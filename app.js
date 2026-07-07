@@ -13,10 +13,56 @@ const APP = {
   studentStatuses: ["Active", "Inactive", "Dropped", "Completed", "On Hold"],
   certificateStatuses: ["Not Eligible", "For Review", "Approved", "Issued"],
   activityStatuses: ["Pending", "Pass", "Fail", "Retake"],
-  defaultActivities: [
-    "ATS Resume Creation", "Resume Optimization", "Interview Practice", "Mock Interview",
-    "Mock Call", "Client Communication Practice", "Job Application Readiness"
-  ]
+  defaultActivities: {
+    AUBK: [
+      "Xero Activity 1 - Asset, Liability, Income, Capital, Expense",
+      "Xero Activity 2 - Chart of Accounts and Journal Entry",
+      "Xero Activity 3 - Chart of Accounts: Accounts Creation",
+      "Xero Activity 4 & 5 - Products and Services",
+      "Xero Activity 6 - Purchases (Bills)",
+      "Xero Activity 7 - More Bills To Record",
+      "Xero Activity 8 - Reconciliation and Report",
+      "Xero Final Activity - Invoice, Bills, Reconciliation, and Report",
+      "Sync2VA Xero Assessment"
+    ],
+    MEDVA: [
+      "Assignment 1 - Mastering Basic Digital Tools",
+      "Assignment 2 - Typing Test & EHR",
+      "Assignment 3 - Insurance Terminologies",
+      "Assignment 4 - Research",
+      "Assignment 5 - Insurance Computations",
+      "Assignment 6 - Referral",
+      "Assignment 7 - MRR",
+      "Assignment 8 - Transcription",
+      "Assignment 9 - Scribing",
+      "Final - Evaluation"
+    ],
+    REVA: [
+      "Activity 1 - Practice MLS Activity",
+      "Activity 2 - Rental Properties & Vendor Research",
+      "Activity 3 - PMVA Accounting Activity",
+      "Activity 4 - Tenant Background Report",
+      "Activity 5 - Comparative Market Analysis",
+      "Activity 6 - Open House Poster",
+      "Activity 7 - Property Search (Buyer's Side)",
+      "Activity 8 - TXN Calendar Scheduling"
+    ],
+    USBK: [
+      "Day 2 - ALICE",
+      "Day 2 - Debit/Credit",
+      "Day 2 - Journal Entry",
+      "Day 2 - Journal, Posting and Trial Balance",
+      "Day 3 - Chart of Accounts",
+      "Day 4 - Products and Services",
+      "Day 5 - Expenses, Bills and Bills Payment",
+      "Day 6 - Sales Receipt, Invoice and Invoice Payment",
+      "Day 7 - Transfer, Journal Entry and Deposit",
+      "Day 8 - Bank Statements",
+      "Day 8 - Bank Transactions",
+      "Day 9 - Reconciliation",
+      "Day 10 - Reports"
+    ]
+  }
 };
 
 const state = {
@@ -878,11 +924,11 @@ async function renderCoachChecklist() {
   const { data, error } = await state.supabase
     .from("students")
     .select(`
-      id,first_name,last_name,email,coach,
-      course_group:course_groups(code),
+      id,first_name,last_name,email,coach,course_group_id,
+      course_group:course_groups(id,code),
       batch:batches(name),
       classroom:classroom_records(invite_status,date_sent,sent_by),
-      student_activities(status,score,activity:activities(name,sort_order)),
+      student_activities(status,score,activity:activities(*)),
       requirements(overall_status)
     `)
     .order("updated_at", { ascending: false })
@@ -933,8 +979,9 @@ async function renderCoachChecklist() {
 
 function coachRows(students) {
   return students.map(student => {
-    const passed = (student.student_activities || []).filter(a => a.status === "Pass").length;
-    const scored = (student.student_activities || []).filter(a => a.score !== null && a.score !== "");
+    const activities = relevantStudentActivities(student);
+    const passed = activities.filter(a => a.status === "Pass").length;
+    const scored = activities.filter(a => a.score !== null && a.score !== "");
     const average = scored.length ? Math.round(scored.reduce((sum, a) => sum + Number(a.score), 0) / scored.length) : null;
     return `
       <tr>
@@ -944,7 +991,7 @@ function coachRows(students) {
         <td><span class="badge badge--teal">${escapeHtml(student.course_group?.code || "—")}</span></td>
         <td>${escapeHtml(student.coach || "Unassigned")}</td>
         <td>${statusBadge(student.classroom?.invite_status || "Pending")}</td>
-        <td>${passed} / ${(student.student_activities || []).length || state.activities.length}</td>
+        <td>${passed} / ${activities.length || activeActivityCountForStudent(student)}</td>
         <td>${average === null ? "—" : `${average}%`}</td>
         <td>${statusBadge(student.requirements?.overall_status || "For Review")}</td>
         <td><button class="icon-btn btn-icon-only" data-coach-student="${student.id}" title="Open coach checklist"><span data-icon="edit-2"></span></button></td>
@@ -954,6 +1001,29 @@ function coachRows(students) {
 
 function bindCoachRows() {
   $$("[data-coach-student]").forEach(btn => btn.addEventListener("click", () => openStudentProfile(btn.dataset.coachStudent, "coaches")));
+}
+
+function relevantStudentActivities(student) {
+  const courseId = student.course_group_id || student.course_group?.id || "";
+  return (student.student_activities || [])
+    .filter(row => {
+      const activity = row.activity || {};
+      if (activity.is_active === false) return false;
+      if (activity.course_group_id && courseId && activity.course_group_id !== courseId) return false;
+      if (activity.course_group_id && !courseId) return false;
+      return true;
+    })
+    .sort((a, b) => (a.activity?.sort_order || 0) - (b.activity?.sort_order || 0));
+}
+
+function activeActivityCountForStudent(student) {
+  const courseId = student.course_group_id || student.course_group?.id || "";
+  return state.activities.filter(activity => {
+    if (activity.is_active === false) return false;
+    if (activity.course_group_id && courseId && activity.course_group_id !== courseId) return false;
+    if (activity.course_group_id && !courseId) return false;
+    return true;
+  }).length;
 }
 
 /* ---------- Certificates ---------- */
@@ -1396,7 +1466,7 @@ function adminTabHtml(record) {
 
 function coachesTabHtml(student) {
   const classroom = student.classroom || {};
-  const activityRows = (student.student_activities || []).sort((a, b) => (a.activity?.sort_order || 0) - (b.activity?.sort_order || 0));
+  const activityRows = relevantStudentActivities(student);
   return `
     <h3>Google Classroom checklist</h3>
     <form id="profile-classroom-form" class="form-grid">
