@@ -1,55 +1,151 @@
 # Sync2VA Student CRM
 
-A responsive, Supabase-backed student operations CRM built with HTML, CSS, and vanilla JavaScript.
+A responsive, Supabase-backed student operations CRM built with vanilla HTML, CSS, and JavaScript.
 
-## Setup
+## Supabase setup - step by step
 
-1. Create a Supabase project.
-2. Open **SQL Editor** in Supabase and run [`supabase-schema.sql`](./supabase-schema.sql).
-3. In **Authentication → Users**, create at least one email/password user.
-4. Copy `config.js` and add your Supabase Project URL and **public anon key**:
+1. Create or open your Supabase project.
+2. Go to **SQL Editor**.
+3. Open `supabase-schema.sql` from this folder.
+4. Copy the full SQL file, paste it into the Supabase SQL Editor, and click **Run**.
+5. Go to **Project Settings > API**.
+6. Copy your **Project URL**.
+7. Copy your public **anon** / **publishable** key. Do not copy the service role key.
+8. Open `config.js` and replace the placeholders:
 
    ```js
    window.SYNC2VA_CONFIG = {
      supabaseUrl: "https://YOUR_PROJECT.supabase.co",
-     supabaseAnonKey: "YOUR_PUBLIC_ANON_KEY"
+     supabaseAnonKey: "YOUR_PUBLIC_ANON_OR_PUBLISHABLE_KEY"
    };
    ```
 
-   You can alternatively enter these values on the app's setup screen. Only the public connection settings are stored in the browser; CRM records always live in Supabase.
+9. Go to **Authentication > Users** and create the login users.
+10. Go to **Table Editor > profiles** and add one row per Auth user:
 
-5. Serve the folder with any static web server. For example:
+   - `Super Admin` - full access
+   - `Admin` - students, batches, coach updates, certificates, reports, partial finance visibility
+   - `Finance` - finance, payments, refunds, balances, due dates
+   - `Coach` - assigned batches/students, classroom, attendance, activity scores/comments, limited training access status
 
-   ```powershell
-   python -m http.server 8080
-   ```
+11. For every coach, add their assigned batches in `coach_batch_assignments`.
+12. Sign in to the CRM and upload/import students.
 
-6. Open `http://localhost:8080` and sign in with the Supabase user.
+Never use a Supabase service role key in this frontend app.
 
-Do not use a Supabase service role key in this frontend app.
+## GitHub Pages setup - step by step
+
+1. Create a new GitHub repository, for example `sync2va-student-crm`.
+2. Upload these files to the repository root:
+
+   - `index.html`
+   - `styles.css`
+   - `app.js`
+   - `config.js`
+   - `supabase-schema.sql`
+   - `README.md`
+
+3. Before uploading publicly, confirm `config.js` contains only your public Supabase URL and anon/publishable key.
+4. Commit the files to the `main` branch.
+5. Go to **Settings > Pages**.
+6. Under **Build and deployment**, choose:
+
+   - Source: `Deploy from a branch`
+   - Branch: `main`
+   - Folder: `/root`
+
+7. Click **Save**.
+8. Wait for GitHub Pages to publish the site.
+9. Open the GitHub Pages URL and sign in using a Supabase Auth user you created.
+10. If sign-in says the Supabase project is not connected, re-check `config.js`, commit the fixed file, and wait for GitHub Pages to redeploy.
+
+## What updates in Supabase
+
+Run `supabase-schema.sql` to add or update:
+
+- Role-aware `profiles`
+- Student source tracking
+- Enrollment and pricing records
+- Finance records with UnionBank reference, refunds, due dates, payment status, and training access status
+- Payment plans and installments
+- Coach batch assignments
+- Attendance sessions and attendance records
+- Email logs
+- Coach checklist status/comment fields
+- Certificate readiness support
+- Row Level Security policies for Super Admin, Admin, Finance, and Coach roles
+
+## What updates in GitHub / the website
+
+Upload the updated frontend files to add:
+
+- Dashboard summaries by source, finance status, batch, course, certificate status, and coach progress
+- Student profile tabs for Overview, Enrollment and Pricing, Finance, Payment Plan, Admin, Coaches, Attendance, Requirements, Certificates, and Notes
+- `2 Weeks` plan logic for Intensive activities only
+- `1 Month` plan logic for Intensive + CAP activities
+- Finance page with payment holds, payment watch, refunds, due dates, balances, and UnionBank reference
+- Coach Checklist page with activity status, comments, final recommendation, and limited finance visibility
+- Attendance page
+- Email Center page
+- Expanded CSV import and reports
+
+## Current modules
+
+- Dashboard
+- Students
+- Course Groups
+- Batches
+- Finance
+- Coach Checklist
+- Attendance
+- Certificates
+- Email Center
+- Reports
+- Settings
+
+## Student process supported
+
+- Student source: Facebook / Social Media, Referral, Webinar, Other
+- Enrollment and pricing: regular price, discount type, discount amount, final price
+- Training plan:
+  - `2 Weeks` = Intensive activities only
+  - `1 Month` = Intensive + CAP activities
+- Finance: UnionBank reference, payment status, training access status, refund status, due dates, amount paid, balance
+- Payment plans: full payment, standard staggered, custom staggered, up to 5 payments
+- Coach checklist: Classroom invite/joined status, activity status, score, coach comment, final recommendation
+- Attendance: batch sessions with Present, Late, Absent, Excused
+- Email Center: logs emails and templates now; direct sending is a TODO for Supabase Edge Function/SMTP
 
 ## CSV import
 
-Use this exact header:
+Required columns:
 
 ```text
-first_name,last_name,email,phone,course_group,batch_month,batch_year,batch_number,training_plan,coach,finance_status,student_status
+first_name,last_name,email,course_group,batch_month,batch_year,batch_number
 ```
 
-- `course_group` must match a configured code such as `USBK` or `CAP USBK`.
-- Optional `training_plan` accepts `2 Weeks` or `1 Month`. If omitted, students default to `2 Weeks`.
-- `batch_month` accepts a month name, abbreviation, or number.
-- `batch_number` must be `1` or `2`.
+Recommended full header:
+
+```text
+first_name,last_name,email,phone,course_group,batch_month,batch_year,batch_number,training_plan,source,regular_price,discount_type,discount_amount,final_price,payment_plan_type,number_of_payments,deposit_amount,finance_status,training_access_status,messenger_group_added,coach,student_status
+```
+
+Notes:
+
+- `training_plan` accepts `2 Weeks` or `1 Month`.
+- `source` accepts Facebook/Social Media, Referral, Webinar, or Other.
+- `finance_status` accepts Pending Deposit, Deposit Paid, Partial Payment, Fully Paid, Payment Watch, Overdue, Payment Hold, Refund Requested, Refunded, Cancelled.
+- `training_access_status` accepts Active, Payment Watch, Payment Hold, Remove from Training, Fully Paid.
 - Missing batches are created automatically.
-- Uploads are inserted in chunks of 200 for large files.
-- A database trigger creates finance, admin, classroom, requirement, activity, and two certificate records for each new student.
-- `2 Weeks` students receive Intensive activities only. `1 Month` students receive Intensive + CAP activities.
 - Duplicate emails are skipped.
+
+## Email sending TODO
+
+The Email Center currently writes to `email_logs`. To send real emails, create a Supabase Edge Function or other backend service using SMTP/API credentials stored as server-side secrets. Do not put SMTP passwords or service role keys in `config.js`.
 
 ## Security notes
 
-- All tables use UUID primary keys and foreign keys.
-- Student-related records use `ON DELETE CASCADE`.
-- Row-level security permits authenticated users and blocks anonymous access.
-- The bundled policy is intentionally team-wide. Add role claims and narrower policies if finance or certificate data should be restricted to specific staff.
-- CSV exports contain personal data and should be handled according to your privacy policy.
+- The app uses the public anon/publishable key only.
+- Supabase RLS is role-aware through `profiles`.
+- If `profiles` is empty, a temporary setup fallback allows authenticated access so you do not lock yourself out.
+- Once profiles are created, coaches only see assigned batches/students and limited training access status, not exact payment amounts.

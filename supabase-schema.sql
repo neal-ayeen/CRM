@@ -46,16 +46,23 @@ create table if not exists public.students (
   batch_id uuid not null references public.batches(id) on delete restrict,
   coach text,
   training_plan text not null default '2 Weeks' check (training_plan in ('2 Weeks', '1 Month')),
+  training_access_status text not null default 'Active'
+    check (training_access_status in ('Active', 'Payment Watch', 'Payment Hold', 'Remove from Training', 'Fully Paid')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 alter table public.students add column if not exists training_plan text;
+alter table public.students add column if not exists training_access_status text;
 update public.students set training_plan = '2 Weeks' where training_plan is null;
+update public.students set training_access_status = 'Active' where training_access_status is null;
 alter table public.students alter column training_plan set default '2 Weeks';
 alter table public.students alter column training_plan set not null;
+alter table public.students alter column training_access_status set default 'Active';
+alter table public.students alter column training_access_status set not null;
 do $$
 begin
+  alter table public.students drop constraint if exists students_training_access_status_check;
   if not exists (
     select 1 from pg_constraint
     where conname = 'students_training_plan_check'
@@ -64,17 +71,24 @@ begin
     alter table public.students
       add constraint students_training_plan_check check (training_plan in ('2 Weeks', '1 Month'));
   end if;
+  alter table public.students
+    add constraint students_training_access_status_check
+    check (training_access_status in ('Active', 'Payment Watch', 'Payment Hold', 'Remove from Training', 'Fully Paid'));
 end;
 $$;
 
 create table if not exists public.finance_records (
   id uuid primary key default gen_random_uuid(),
   student_id uuid not null unique references public.students(id) on delete cascade,
-  payment_status text not null default 'Pending Payment'
-    check (payment_status in ('Pending Payment', 'Downpayment Paid', 'Fully Paid', 'Refunded')),
+  payment_status text not null default 'Pending Deposit'
+    check (payment_status in (
+      'Pending Deposit', 'Deposit Paid', 'Partial Payment', 'Fully Paid',
+      'Payment Watch', 'Overdue', 'Payment Hold', 'Refund Requested',
+      'Refunded', 'Cancelled'
+    )),
   amount_paid numeric(12,2) not null default 0 check (amount_paid >= 0),
   balance numeric(12,2) not null default 0 check (balance >= 0),
-  payment_method text check (payment_method is null or payment_method in ('GCash', 'Bank Transfer', 'PayPal', 'Cash', 'Other')),
+  payment_method text default 'UnionBank' check (payment_method is null or payment_method in ('UnionBank', 'GCash', 'Bank Transfer', 'PayPal', 'Cash', 'Other')),
   payment_date date,
   notes text,
   created_at timestamptz not null default now(),
@@ -153,7 +167,7 @@ create table if not exists public.student_activities (
   id uuid primary key default gen_random_uuid(),
   student_id uuid not null references public.students(id) on delete cascade,
   activity_id uuid not null references public.activities(id) on delete restrict,
-  status text not null default 'Pending' check (status in ('Pending', 'Pass', 'Fail', 'Retake')),
+  status text not null default 'Not Started' check (status in ('Not Started', 'Submitted', 'Passed', 'Returned', 'Failed')),
   score numeric(5,2) check (score is null or (score >= 0 and score <= 100)),
   coach_notes text,
   date_checked date,
@@ -201,6 +215,229 @@ create table if not exists public.student_notes (
 );
 
 -- ---------------------------------------------------------------------------
+-- Sync2VA operational upgrades: roles, sources, pricing, payments, attendance.
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.profiles (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  full_name text,
+  role text not null default 'Admin'
+    check (role in ('Super Admin', 'Admin', 'Finance', 'Coach')),
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.student_sources (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  default_discount_type text not null default 'None'
+    check (default_discount_type in ('None', 'Percentage', 'Fixed', 'Custom')),
+  default_discount_amount numeric(12,2) not null default 0 check (default_discount_amount >= 0),
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.enrollment_records (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null unique references public.students(id) on delete cascade,
+  source_id uuid references public.student_sources(id) on delete set null,
+  source_name text,
+  regular_price numeric(12,2) not null default 0 check (regular_price >= 0),
+  discount_type text not null default 'None'
+    check (discount_type in ('None', 'Referral', 'Webinar', 'Fixed', 'Percentage', 'Custom')),
+  discount_amount numeric(12,2) not null default 0 check (discount_amount >= 0),
+  final_price numeric(12,2) not null default 0 check (final_price >= 0),
+  enrollment_status text not null default 'Pending Deposit'
+    check (enrollment_status in ('Pending Deposit', 'Officially Enrolled', 'Cancelled', 'Completed')),
+  messenger_group_added boolean not null default false,
+  finance_exception_approved boolean not null default false,
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.payment_plans (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null unique references public.students(id) on delete cascade,
+  plan_type text not null default 'Full Payment'
+    check (plan_type in ('Full Payment', 'Standard Staggered', 'Custom Staggered')),
+  number_of_payments smallint not null default 1 check (number_of_payments between 1 and 5),
+  deposit_amount numeric(12,2) not null default 0 check (deposit_amount >= 0),
+  total_contract_amount numeric(12,2) not null default 0 check (total_contract_amount >= 0),
+  total_paid numeric(12,2) not null default 0 check (total_paid >= 0),
+  balance numeric(12,2) not null default 0 check (balance >= 0),
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.payment_installments (
+  id uuid primary key default gen_random_uuid(),
+  payment_plan_id uuid references public.payment_plans(id) on delete cascade,
+  student_id uuid not null references public.students(id) on delete cascade,
+  installment_number smallint not null check (installment_number between 1 and 5),
+  label text,
+  due_date date,
+  amount_due numeric(12,2) not null default 0 check (amount_due >= 0),
+  amount_paid numeric(12,2) not null default 0 check (amount_paid >= 0),
+  payment_status text not null default 'Pending'
+    check (payment_status in ('Pending', 'Partial', 'Paid', 'Overdue', 'Waived', 'Refunded')),
+  payment_method text,
+  unionbank_reference text,
+  payment_date date,
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint payment_installments_plan_number_key unique (payment_plan_id, installment_number)
+);
+
+create table if not exists public.coach_batch_assignments (
+  coach_user_id uuid not null references auth.users(id) on delete cascade,
+  batch_id uuid not null references public.batches(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (coach_user_id, batch_id)
+);
+
+create table if not exists public.attendance_sessions (
+  id uuid primary key default gen_random_uuid(),
+  batch_id uuid not null references public.batches(id) on delete cascade,
+  title text not null,
+  session_date date not null default current_date,
+  created_by uuid references auth.users(id) on delete set null,
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.attendance_records (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid not null references public.attendance_sessions(id) on delete cascade,
+  student_id uuid not null references public.students(id) on delete cascade,
+  status text not null default 'Present'
+    check (status in ('Present', 'Late', 'Absent', 'Excused')),
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint attendance_records_session_student_key unique (session_id, student_id)
+);
+
+create table if not exists public.email_logs (
+  id uuid primary key default gen_random_uuid(),
+  sent_by uuid references auth.users(id) on delete set null,
+  student_id uuid references public.students(id) on delete set null,
+  batch_id uuid references public.batches(id) on delete set null,
+  recipients text[] not null default '{}',
+  template text,
+  subject text not null,
+  body text not null,
+  status text not null default 'Logged'
+    check (status in ('Draft', 'Logged', 'Queued', 'Sent', 'Failed')),
+  sent_at timestamptz,
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.finance_records add column if not exists training_access_status text;
+alter table public.finance_records add column if not exists unionbank_reference text;
+alter table public.finance_records add column if not exists due_date date;
+alter table public.finance_records add column if not exists refund_requested boolean not null default false;
+alter table public.finance_records add column if not exists refund_status text not null default 'None';
+alter table public.finance_records add column if not exists refund_reason text;
+alter table public.finance_records add column if not exists refund_date date;
+
+alter table public.classroom_records add column if not exists joined_status text;
+alter table public.classroom_records add column if not exists final_coach_recommendation text;
+alter table public.classroom_records add column if not exists coach_comment text;
+
+alter table public.student_activities add column if not exists coach_comment text;
+
+do $$
+begin
+  alter table public.finance_records drop constraint if exists finance_records_payment_status_check;
+  alter table public.finance_records drop constraint if exists finance_records_payment_method_check;
+  alter table public.finance_records drop constraint if exists finance_records_training_access_status_check;
+  alter table public.finance_records drop constraint if exists finance_records_refund_status_check;
+  alter table public.student_activities drop constraint if exists student_activities_status_check;
+  alter table public.classroom_records drop constraint if exists classroom_records_joined_status_check;
+  alter table public.classroom_records drop constraint if exists classroom_records_final_coach_recommendation_check;
+end;
+$$;
+
+update public.finance_records
+set payment_status = case payment_status
+  when 'Pending Payment' then 'Pending Deposit'
+  when 'Downpayment Paid' then 'Deposit Paid'
+  else payment_status
+end;
+
+update public.student_activities
+set status = case status
+  when 'Pending' then 'Not Started'
+  when 'Pass' then 'Passed'
+  when 'Fail' then 'Failed'
+  when 'Retake' then 'Returned'
+  else status
+end;
+
+update public.finance_records
+set training_access_status = case
+  when training_access_status is not null then training_access_status
+  when payment_status = 'Fully Paid' then 'Fully Paid'
+  when payment_status in ('Payment Hold', 'Overdue') then 'Payment Hold'
+  when payment_status = 'Payment Watch' then 'Payment Watch'
+  when payment_status = 'Cancelled' then 'Remove from Training'
+  else 'Active'
+end;
+
+update public.students s
+set training_access_status = coalesce(f.training_access_status, 'Active')
+from public.finance_records f
+where f.student_id = s.id;
+
+alter table public.finance_records alter column payment_status set default 'Pending Deposit';
+alter table public.finance_records alter column payment_method set default 'UnionBank';
+alter table public.finance_records alter column refund_status set default 'None';
+alter table public.finance_records alter column training_access_status set default 'Active';
+alter table public.student_activities alter column status set default 'Not Started';
+alter table public.classroom_records alter column joined_status set default 'Pending';
+alter table public.classroom_records alter column final_coach_recommendation set default 'Incomplete';
+
+alter table public.finance_records
+  add constraint finance_records_payment_status_check
+  check (payment_status in (
+    'Pending Deposit', 'Deposit Paid', 'Partial Payment', 'Fully Paid',
+    'Payment Watch', 'Overdue', 'Payment Hold', 'Refund Requested',
+    'Refunded', 'Cancelled'
+  ));
+
+alter table public.finance_records
+  add constraint finance_records_payment_method_check
+  check (payment_method is null or payment_method in ('UnionBank', 'GCash', 'Bank Transfer', 'PayPal', 'Cash', 'Other'));
+
+alter table public.finance_records
+  add constraint finance_records_training_access_status_check
+  check (training_access_status in ('Active', 'Payment Watch', 'Payment Hold', 'Remove from Training', 'Fully Paid'));
+
+alter table public.finance_records
+  add constraint finance_records_refund_status_check
+  check (refund_status in ('None', 'Requested', 'Approved', 'Processing', 'Refunded', 'Rejected'));
+
+alter table public.student_activities
+  add constraint student_activities_status_check
+  check (status in ('Not Started', 'Submitted', 'Passed', 'Returned', 'Failed'));
+
+alter table public.classroom_records
+  add constraint classroom_records_joined_status_check
+  check (joined_status is null or joined_status in ('Yes', 'No', 'Pending'));
+
+alter table public.classroom_records
+  add constraint classroom_records_final_coach_recommendation_check
+  check (final_coach_recommendation is null or final_coach_recommendation in ('Passed', 'Failed', 'Incomplete'));
+
+-- ---------------------------------------------------------------------------
 -- Reference data
 -- ---------------------------------------------------------------------------
 
@@ -217,6 +454,18 @@ values
 on conflict (code) do update
 set name = excluded.name,
     program_type = excluded.program_type;
+
+insert into public.student_sources (name, default_discount_type, default_discount_amount, is_active)
+values
+  ('Facebook / Social Media', 'None', 0, true),
+  ('Referral', 'Custom', 0, true),
+  ('Webinar', 'Fixed', 0, true),
+  ('Other', 'None', 0, true)
+on conflict (name) do update
+set default_discount_type = excluded.default_discount_type,
+    default_discount_amount = excluded.default_discount_amount,
+    is_active = true,
+    updated_at = now();
 
 with activity_seed(activity_track, course_code, sort_order, name) as (
   values
@@ -303,9 +552,10 @@ declare
   table_name text;
 begin
   foreach table_name in array array[
-    'course_groups', 'batches', 'students', 'finance_records', 'admin_records',
+    'profiles', 'student_sources', 'course_groups', 'batches', 'students', 'finance_records', 'admin_records',
     'classroom_records', 'activities', 'student_activities', 'requirements',
-    'certificates', 'student_notes'
+    'certificates', 'student_notes', 'enrollment_records', 'payment_plans',
+    'payment_installments', 'attendance_sessions', 'attendance_records', 'email_logs'
   ]
   loop
     execute format('drop trigger if exists set_%I_updated_at on public.%I', table_name, table_name);
@@ -316,6 +566,25 @@ begin
   end loop;
 end;
 $$;
+
+create or replace function public.sync_student_training_access_status()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.students
+  set training_access_status = coalesce(new.training_access_status, 'Active')
+  where id = new.student_id;
+  return new;
+end;
+$$;
+
+drop trigger if exists sync_student_training_access_status_after_write on public.finance_records;
+create trigger sync_student_training_access_status_after_write
+after insert or update of training_access_status on public.finance_records
+for each row execute function public.sync_student_training_access_status();
 
 create or replace function public.calculate_requirement_status()
 returns trigger
@@ -373,6 +642,14 @@ begin
   on conflict (student_id) do nothing;
 
   insert into public.requirements (student_id) values (new.id)
+  on conflict (student_id) do nothing;
+
+  insert into public.enrollment_records (student_id, source_name, enrollment_status)
+  values (new.id, 'Other', 'Pending Deposit')
+  on conflict (student_id) do nothing;
+
+  insert into public.payment_plans (student_id, plan_type, number_of_payments)
+  values (new.id, 'Full Payment', 1)
   on conflict (student_id) do nothing;
 
   insert into public.certificates (student_id, certificate_type)
@@ -435,6 +712,14 @@ insert into public.requirements (student_id)
 select id from public.students
 on conflict (student_id) do nothing;
 
+insert into public.enrollment_records (student_id, source_name, enrollment_status)
+select id, 'Other', 'Pending Deposit' from public.students
+on conflict (student_id) do nothing;
+
+insert into public.payment_plans (student_id, plan_type, number_of_payments)
+select id, 'Full Payment', 1 from public.students
+on conflict (student_id) do nothing;
+
 insert into public.certificates (student_id, certificate_type)
 select s.id, types.certificate_type
 from public.students s
@@ -473,6 +758,7 @@ on conflict (student_id, activity_id) do nothing;
 create index if not exists students_course_group_idx on public.students(course_group_id);
 create index if not exists students_batch_idx on public.students(batch_id);
 create index if not exists students_training_plan_idx on public.students(training_plan);
+create index if not exists students_training_access_idx on public.students(training_access_status);
 create index if not exists students_updated_at_idx on public.students(updated_at desc);
 create index if not exists students_first_name_trgm_idx on public.students using gin (lower(first_name) gin_trgm_ops);
 create index if not exists students_last_name_trgm_idx on public.students using gin (lower(last_name) gin_trgm_ops);
@@ -492,57 +778,247 @@ create index if not exists requirements_overall_idx on public.requirements(overa
 create index if not exists certificates_status_idx on public.certificates(status);
 create index if not exists certificates_number_idx on public.certificates(certificate_number);
 create index if not exists student_notes_student_created_idx on public.student_notes(student_id, created_at desc);
+create index if not exists profiles_role_idx on public.profiles(role);
+create index if not exists enrollment_records_source_idx on public.enrollment_records(source_id, source_name);
+create index if not exists enrollment_records_status_idx on public.enrollment_records(enrollment_status);
+create index if not exists finance_training_access_idx on public.finance_records(training_access_status);
+create index if not exists finance_refund_status_idx on public.finance_records(refund_status);
+create index if not exists payment_installments_student_idx on public.payment_installments(student_id, due_date);
+create index if not exists payment_installments_status_idx on public.payment_installments(payment_status);
+create index if not exists coach_batch_assignments_batch_idx on public.coach_batch_assignments(batch_id);
+create index if not exists attendance_sessions_batch_date_idx on public.attendance_sessions(batch_id, session_date desc);
+create index if not exists attendance_records_student_idx on public.attendance_records(student_id);
+create index if not exists email_logs_created_idx on public.email_logs(created_at desc);
 
 -- ---------------------------------------------------------------------------
--- Row-level security: authenticated users can operate the CRM.
--- Tighten these policies later if your team needs role-specific permissions.
+-- Row-level security with roles.
+-- If profiles is empty, authenticated users keep setup access so you do not
+-- lock yourself out. Add profiles rows for real production role enforcement.
 -- ---------------------------------------------------------------------------
 
-alter table public.course_groups enable row level security;
-alter table public.batches enable row level security;
-alter table public.students enable row level security;
-alter table public.finance_records enable row level security;
-alter table public.admin_records enable row level security;
-alter table public.classroom_records enable row level security;
-alter table public.activities enable row level security;
-alter table public.student_activities enable row level security;
-alter table public.requirements enable row level security;
-alter table public.certificates enable row level security;
-alter table public.student_notes enable row level security;
+create or replace function public.no_profiles_yet()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select not exists (select 1 from public.profiles);
+$$;
+
+create or replace function public.current_user_role()
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.role from public.profiles p where p.user_id = auth.uid() and p.is_active = true;
+$$;
+
+create or replace function public.has_role(required_roles text[])
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.no_profiles_yet()
+    or coalesce(public.current_user_role() = any(required_roles), false);
+$$;
+
+create or replace function public.can_access_batch(target_batch_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.no_profiles_yet()
+    or coalesce(public.current_user_role() = any(array['Super Admin','Admin','Finance']), false)
+    or (
+      public.current_user_role() = 'Coach'
+      and exists (
+        select 1
+        from public.coach_batch_assignments cba
+        where cba.coach_user_id = auth.uid()
+          and cba.batch_id = target_batch_id
+      )
+    );
+$$;
+
+create or replace function public.can_access_student(target_student_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.no_profiles_yet()
+    or coalesce(public.current_user_role() = any(array['Super Admin','Admin','Finance']), false)
+    or (
+      public.current_user_role() = 'Coach'
+      and exists (
+        select 1
+        from public.students s
+        join public.coach_batch_assignments cba on cba.batch_id = s.batch_id
+        where s.id = target_student_id
+          and cba.coach_user_id = auth.uid()
+      )
+    );
+$$;
 
 do $$
 declare
   table_name text;
 begin
   foreach table_name in array array[
-    'course_groups', 'batches', 'students', 'finance_records', 'admin_records',
-    'classroom_records', 'activities', 'student_activities', 'requirements',
-    'certificates', 'student_notes'
+    'profiles', 'student_sources', 'course_groups', 'batches', 'students',
+    'finance_records', 'admin_records', 'classroom_records', 'activities',
+    'student_activities', 'requirements', 'certificates', 'student_notes',
+    'enrollment_records', 'payment_plans', 'payment_installments',
+    'coach_batch_assignments', 'attendance_sessions', 'attendance_records',
+    'email_logs'
   ]
   loop
+    execute format('alter table public.%I enable row level security', table_name);
     execute format('drop policy if exists "Authenticated users can view" on public.%I', table_name);
     execute format('drop policy if exists "Authenticated users can insert" on public.%I', table_name);
     execute format('drop policy if exists "Authenticated users can update" on public.%I', table_name);
     execute format('drop policy if exists "Authenticated users can delete" on public.%I', table_name);
-
-    execute format(
-      'create policy "Authenticated users can view" on public.%I for select to authenticated using (true)',
-      table_name
-    );
-    execute format(
-      'create policy "Authenticated users can insert" on public.%I for insert to authenticated with check (true)',
-      table_name
-    );
-    execute format(
-      'create policy "Authenticated users can update" on public.%I for update to authenticated using (true) with check (true)',
-      table_name
-    );
-    execute format(
-      'create policy "Authenticated users can delete" on public.%I for delete to authenticated using (true)',
-      table_name
-    );
+    execute format('drop policy if exists "Role select" on public.%I', table_name);
+    execute format('drop policy if exists "Role insert" on public.%I', table_name);
+    execute format('drop policy if exists "Role update" on public.%I', table_name);
+    execute format('drop policy if exists "Role delete" on public.%I', table_name);
   end loop;
 end;
 $$;
+
+create policy "Role select" on public.profiles
+for select to authenticated
+using (public.no_profiles_yet() or user_id = auth.uid() or public.has_role(array['Super Admin','Admin']));
+create policy "Role insert" on public.profiles
+for insert to authenticated
+with check (public.no_profiles_yet() or public.has_role(array['Super Admin','Admin']));
+create policy "Role update" on public.profiles
+for update to authenticated
+using (public.has_role(array['Super Admin','Admin']))
+with check (public.has_role(array['Super Admin','Admin']));
+create policy "Role delete" on public.profiles
+for delete to authenticated
+using (public.has_role(array['Super Admin']));
+
+create policy "Role select" on public.student_sources for select to authenticated using (true);
+create policy "Role insert" on public.student_sources for insert to authenticated with check (public.has_role(array['Super Admin','Admin']));
+create policy "Role update" on public.student_sources for update to authenticated using (public.has_role(array['Super Admin','Admin'])) with check (public.has_role(array['Super Admin','Admin']));
+create policy "Role delete" on public.student_sources for delete to authenticated using (public.has_role(array['Super Admin']));
+
+create policy "Role select" on public.course_groups for select to authenticated using (true);
+create policy "Role insert" on public.course_groups for insert to authenticated with check (public.has_role(array['Super Admin','Admin']));
+create policy "Role update" on public.course_groups for update to authenticated using (public.has_role(array['Super Admin','Admin'])) with check (public.has_role(array['Super Admin','Admin']));
+create policy "Role delete" on public.course_groups for delete to authenticated using (public.has_role(array['Super Admin']));
+
+create policy "Role select" on public.batches for select to authenticated using (public.has_role(array['Super Admin','Admin','Finance']) or public.can_access_batch(id));
+create policy "Role insert" on public.batches for insert to authenticated with check (public.has_role(array['Super Admin','Admin']));
+create policy "Role update" on public.batches for update to authenticated using (public.has_role(array['Super Admin','Admin'])) with check (public.has_role(array['Super Admin','Admin']));
+create policy "Role delete" on public.batches for delete to authenticated using (public.has_role(array['Super Admin']));
+
+create policy "Role select" on public.students for select to authenticated using (public.can_access_student(id));
+create policy "Role insert" on public.students for insert to authenticated with check (public.has_role(array['Super Admin','Admin']));
+create policy "Role update" on public.students for update to authenticated using (public.has_role(array['Super Admin','Admin'])) with check (public.has_role(array['Super Admin','Admin']));
+create policy "Role delete" on public.students for delete to authenticated using (public.has_role(array['Super Admin']));
+
+create policy "Role select" on public.finance_records for select to authenticated using (public.has_role(array['Super Admin','Admin','Finance']));
+create policy "Role insert" on public.finance_records for insert to authenticated with check (public.has_role(array['Super Admin','Admin','Finance']));
+create policy "Role update" on public.finance_records for update to authenticated using (public.has_role(array['Super Admin','Admin','Finance'])) with check (public.has_role(array['Super Admin','Admin','Finance']));
+create policy "Role delete" on public.finance_records for delete to authenticated using (public.has_role(array['Super Admin']));
+
+create policy "Role select" on public.admin_records for select to authenticated using (public.has_role(array['Super Admin','Admin','Finance']));
+create policy "Role insert" on public.admin_records for insert to authenticated with check (public.has_role(array['Super Admin','Admin']));
+create policy "Role update" on public.admin_records for update to authenticated using (public.has_role(array['Super Admin','Admin'])) with check (public.has_role(array['Super Admin','Admin']));
+create policy "Role delete" on public.admin_records for delete to authenticated using (public.has_role(array['Super Admin']));
+
+create policy "Role select" on public.classroom_records for select to authenticated using (public.can_access_student(student_id));
+create policy "Role insert" on public.classroom_records for insert to authenticated with check (public.has_role(array['Super Admin','Admin']) or public.can_access_student(student_id));
+create policy "Role update" on public.classroom_records for update to authenticated using (public.has_role(array['Super Admin','Admin']) or public.can_access_student(student_id)) with check (public.has_role(array['Super Admin','Admin']) or public.can_access_student(student_id));
+create policy "Role delete" on public.classroom_records for delete to authenticated using (public.has_role(array['Super Admin']));
+
+create policy "Role select" on public.activities for select to authenticated using (true);
+create policy "Role insert" on public.activities for insert to authenticated with check (public.has_role(array['Super Admin','Admin']));
+create policy "Role update" on public.activities for update to authenticated using (public.has_role(array['Super Admin','Admin'])) with check (public.has_role(array['Super Admin','Admin']));
+create policy "Role delete" on public.activities for delete to authenticated using (public.has_role(array['Super Admin']));
+
+create policy "Role select" on public.student_activities for select to authenticated using (public.can_access_student(student_id));
+create policy "Role insert" on public.student_activities for insert to authenticated with check (public.has_role(array['Super Admin','Admin']) or public.can_access_student(student_id));
+create policy "Role update" on public.student_activities for update to authenticated using (public.has_role(array['Super Admin','Admin']) or public.can_access_student(student_id)) with check (public.has_role(array['Super Admin','Admin']) or public.can_access_student(student_id));
+create policy "Role delete" on public.student_activities for delete to authenticated using (public.has_role(array['Super Admin']));
+
+create policy "Role select" on public.requirements for select to authenticated using (public.can_access_student(student_id));
+create policy "Role insert" on public.requirements for insert to authenticated with check (public.has_role(array['Super Admin','Admin']));
+create policy "Role update" on public.requirements for update to authenticated using (public.has_role(array['Super Admin','Admin','Finance'])) with check (public.has_role(array['Super Admin','Admin','Finance']));
+create policy "Role delete" on public.requirements for delete to authenticated using (public.has_role(array['Super Admin']));
+
+create policy "Role select" on public.certificates for select to authenticated using (public.can_access_student(student_id));
+create policy "Role insert" on public.certificates for insert to authenticated with check (public.has_role(array['Super Admin','Admin']));
+create policy "Role update" on public.certificates for update to authenticated using (public.has_role(array['Super Admin','Admin'])) with check (public.has_role(array['Super Admin','Admin']));
+create policy "Role delete" on public.certificates for delete to authenticated using (public.has_role(array['Super Admin']));
+
+create policy "Role select" on public.student_notes for select to authenticated using (public.can_access_student(student_id));
+create policy "Role insert" on public.student_notes for insert to authenticated with check (public.can_access_student(student_id));
+create policy "Role update" on public.student_notes for update to authenticated using (public.has_role(array['Super Admin','Admin'])) with check (public.has_role(array['Super Admin','Admin']));
+create policy "Role delete" on public.student_notes for delete to authenticated using (public.has_role(array['Super Admin','Admin']));
+
+create policy "Role select" on public.enrollment_records for select to authenticated using (public.has_role(array['Super Admin','Admin','Finance']) or public.can_access_student(student_id));
+create policy "Role insert" on public.enrollment_records for insert to authenticated with check (public.has_role(array['Super Admin','Admin']));
+create policy "Role update" on public.enrollment_records for update to authenticated using (public.has_role(array['Super Admin','Admin','Finance'])) with check (public.has_role(array['Super Admin','Admin','Finance']));
+create policy "Role delete" on public.enrollment_records for delete to authenticated using (public.has_role(array['Super Admin']));
+
+create policy "Role select" on public.payment_plans for select to authenticated using (public.has_role(array['Super Admin','Admin','Finance']));
+create policy "Role insert" on public.payment_plans for insert to authenticated with check (public.has_role(array['Super Admin','Admin','Finance']));
+create policy "Role update" on public.payment_plans for update to authenticated using (public.has_role(array['Super Admin','Admin','Finance'])) with check (public.has_role(array['Super Admin','Admin','Finance']));
+create policy "Role delete" on public.payment_plans for delete to authenticated using (public.has_role(array['Super Admin']));
+
+create policy "Role select" on public.payment_installments for select to authenticated using (public.has_role(array['Super Admin','Admin','Finance']));
+create policy "Role insert" on public.payment_installments for insert to authenticated with check (public.has_role(array['Super Admin','Admin','Finance']));
+create policy "Role update" on public.payment_installments for update to authenticated using (public.has_role(array['Super Admin','Admin','Finance'])) with check (public.has_role(array['Super Admin','Admin','Finance']));
+create policy "Role delete" on public.payment_installments for delete to authenticated using (public.has_role(array['Super Admin','Finance']));
+
+create policy "Role select" on public.coach_batch_assignments for select to authenticated using (public.has_role(array['Super Admin','Admin']) or coach_user_id = auth.uid());
+create policy "Role insert" on public.coach_batch_assignments for insert to authenticated with check (public.has_role(array['Super Admin','Admin']));
+create policy "Role update" on public.coach_batch_assignments for update to authenticated using (public.has_role(array['Super Admin','Admin'])) with check (public.has_role(array['Super Admin','Admin']));
+create policy "Role delete" on public.coach_batch_assignments for delete to authenticated using (public.has_role(array['Super Admin','Admin']));
+
+create policy "Role select" on public.attendance_sessions for select to authenticated using (public.can_access_batch(batch_id));
+create policy "Role insert" on public.attendance_sessions for insert to authenticated with check (public.can_access_batch(batch_id));
+create policy "Role update" on public.attendance_sessions for update to authenticated using (public.can_access_batch(batch_id)) with check (public.can_access_batch(batch_id));
+create policy "Role delete" on public.attendance_sessions for delete to authenticated using (public.has_role(array['Super Admin','Admin']));
+
+create policy "Role select" on public.attendance_records for select to authenticated using (
+  exists (select 1 from public.attendance_sessions s where s.id = session_id and public.can_access_batch(s.batch_id))
+);
+create policy "Role insert" on public.attendance_records for insert to authenticated with check (
+  exists (select 1 from public.attendance_sessions s where s.id = session_id and public.can_access_batch(s.batch_id))
+);
+create policy "Role update" on public.attendance_records for update to authenticated using (
+  exists (select 1 from public.attendance_sessions s where s.id = session_id and public.can_access_batch(s.batch_id))
+) with check (
+  exists (select 1 from public.attendance_sessions s where s.id = session_id and public.can_access_batch(s.batch_id))
+);
+create policy "Role delete" on public.attendance_records for delete to authenticated using (public.has_role(array['Super Admin','Admin']));
+
+create policy "Role select" on public.email_logs for select to authenticated using (
+  public.has_role(array['Super Admin','Admin','Finance']) or sent_by = auth.uid()
+);
+create policy "Role insert" on public.email_logs for insert to authenticated with check (public.has_role(array['Super Admin','Admin','Finance','Coach']));
+create policy "Role update" on public.email_logs for update to authenticated using (public.has_role(array['Super Admin','Admin']) or sent_by = auth.uid()) with check (public.has_role(array['Super Admin','Admin']) or sent_by = auth.uid());
+create policy "Role delete" on public.email_logs for delete to authenticated using (public.has_role(array['Super Admin','Admin']));
+
+-- Supabase API grants. Row Level Security above still controls what each role
+-- can actually read or write.
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on all tables in schema public to authenticated;
+grant execute on all functions in schema public to authenticated;
+alter default privileges in schema public grant select, insert, update, delete on tables to authenticated;
+alter default privileges in schema public grant execute on functions to authenticated;
 
 commit;

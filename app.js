@@ -9,10 +9,48 @@ const APP = {
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"
   ],
-  financeStatuses: ["Pending Payment", "Downpayment Paid", "Fully Paid", "Refunded"],
+  roles: ["Super Admin", "Admin", "Finance", "Coach"],
+  sources: ["Facebook / Social Media", "Referral", "Webinar", "Other"],
+  financeStatuses: ["Pending Deposit", "Deposit Paid", "Partial Payment", "Fully Paid", "Payment Watch", "Overdue", "Payment Hold", "Refund Requested", "Refunded", "Cancelled"],
+  trainingAccessStatuses: ["Active", "Payment Watch", "Payment Hold", "Remove from Training", "Fully Paid"],
+  refundStatuses: ["None", "Requested", "Approved", "Processing", "Refunded", "Rejected"],
+  paymentMethods: ["UnionBank", "GCash", "Bank Transfer", "PayPal", "Cash", "Other"],
+  paymentPlanTypes: ["Full Payment", "Standard Staggered", "Custom Staggered"],
   studentStatuses: ["Active", "Inactive", "Dropped", "Completed", "On Hold"],
   certificateStatuses: ["Not Eligible", "For Review", "Approved", "Issued"],
-  activityStatuses: ["Pending", "Pass", "Fail", "Retake"],
+  activityStatuses: ["Not Started", "Submitted", "Passed", "Returned", "Failed"],
+  attendanceStatuses: ["Present", "Late", "Absent", "Excused"],
+  coachRecommendations: ["Passed", "Failed", "Incomplete"],
+  emailTemplates: {
+    "Welcome to Sync2VA Training": {
+      subject: "Welcome to Sync2VA Training",
+      body: "Hi {{student_name}},\n\nWelcome to Sync2VA Training! We are excited to have you in {{course_group}} - {{batch_name}}.\n\nPlease watch for your Google Classroom invitation and training reminders.\n\nBest,\nSync2VA Team"
+    },
+    "Google Classroom Invite Reminder": {
+      subject: "Reminder: Join your Google Classroom",
+      body: "Hi {{student_name}},\n\nPlease check your email and join the Google Classroom for {{course_group}}. Let us know if you did not receive the invite.\n\nBest,\nSync2VA Team"
+    },
+    "Missing Activity Reminder": {
+      subject: "Reminder: Complete your pending activity",
+      body: "Hi {{student_name}},\n\nThis is a reminder to complete your pending Sync2VA training activity in Google Classroom.\n\nBest,\nSync2VA Coaches"
+    },
+    "Attendance Concern": {
+      subject: "Attendance Concern",
+      body: "Hi {{student_name}},\n\nWe noticed an attendance concern in your current batch. Please coordinate with your coach/admin as soon as possible.\n\nBest,\nSync2VA Team"
+    },
+    "Payment Reminder": {
+      subject: "Payment Reminder",
+      body: "Hi {{student_name}},\n\nThis is a reminder about your remaining Sync2VA training payment. Please coordinate with Finance for confirmation.\n\nBest,\nSync2VA Finance"
+    },
+    "Training Completion": {
+      subject: "Training Completion",
+      body: "Hi {{student_name}},\n\nCongratulations on completing your Sync2VA training requirements. We will review your certificate readiness next.\n\nBest,\nSync2VA Team"
+    },
+    "Certificate Release": {
+      subject: "Certificate Release",
+      body: "Hi {{student_name}},\n\nYour Sync2VA certificate is ready/released. Please coordinate with Admin for the next steps.\n\nBest,\nSync2VA Team"
+    }
+  },
   planOptions: ["2 Weeks", "1 Month"],
   defaultActivities: {
     AUBK: [
@@ -82,6 +120,8 @@ const state = {
   courseGroups: [],
   batches: [],
   activities: [],
+  studentSources: [],
+  userProfile: null,
   selectedStudents: new Set(),
   studentsPage: 1,
   studentFilters: {},
@@ -99,7 +139,9 @@ const pageMeta = {
   batches: ["Batches", "Cohort management"],
   finance: ["Finance", "Payment tracking"],
   "coach-checklist": ["Coach Checklist", "Student readiness"],
+  attendance: ["Attendance", "Class sessions"],
   certificates: ["Certificates", "Completion workflow"],
+  "email-center": ["Email Center", "Student communications"],
   reports: ["Reports", "Data exports"],
   settings: ["Settings", "Workspace configuration"]
 };
@@ -161,23 +203,56 @@ function showAuthScreen(message = "") {
 async function enterApp() {
   $("#auth-screen").classList.add("hidden");
   $("#app-shell").classList.remove("hidden");
+  await loadUserProfile();
   updateUserChip();
   await loadLookups();
+  applyRoleAccess();
   routeFromHash();
 }
 
 async function loadLookups() {
-  const [courseResult, batchResult, activitiesResult] = await Promise.all([
+  const [courseResult, batchResult, activitiesResult, sourcesResult] = await Promise.all([
     state.supabase.from("course_groups").select("*").order("code"),
     state.supabase.from("batches").select("*, course_group:course_groups(id,code,name)").order("year", { ascending: false }).order("month", { ascending: false }).order("batch_number"),
-    state.supabase.from("activities").select("*").eq("is_active", true).order("sort_order")
+    state.supabase.from("activities").select("*").eq("is_active", true).order("sort_order"),
+    state.supabase.from("student_sources").select("*").eq("is_active", true).order("name")
   ]);
   if (courseResult.error) throw courseResult.error;
   if (batchResult.error) throw batchResult.error;
   if (activitiesResult.error) throw activitiesResult.error;
+  if (sourcesResult.error && !/relation .*student_sources.*does not exist/i.test(sourcesResult.error.message || "")) throw sourcesResult.error;
   state.courseGroups = courseResult.data || [];
   state.batches = batchResult.data || [];
   state.activities = activitiesResult.data || [];
+  state.studentSources = sourcesResult.data?.length ? sourcesResult.data : APP.sources.map(name => ({ name }));
+}
+
+async function loadUserProfile() {
+  const email = state.session?.user?.email || "";
+  try {
+    const { data, error } = await state.supabase
+      .from("profiles")
+      .select("*")
+      .eq("user_id", state.session.user.id)
+      .maybeSingle();
+    if (error && !/relation .*profiles.*does not exist/i.test(error.message || "")) throw error;
+    state.userProfile = data || {
+      user_id: state.session.user.id,
+      full_name: state.session.user.user_metadata?.full_name || email.split("@")[0],
+      role: "Admin",
+      is_active: true,
+      setup_fallback: true
+    };
+  } catch (error) {
+    console.warn("Profile fallback:", error);
+    state.userProfile = {
+      user_id: state.session?.user?.id,
+      full_name: email.split("@")[0],
+      role: "Admin",
+      is_active: true,
+      setup_fallback: true
+    };
+  }
 }
 
 function bindShellEvents() {
@@ -247,10 +322,46 @@ async function signOut() {
 
 function updateUserChip() {
   const email = state.session?.user?.email || "Authenticated user";
-  const displayName = state.session?.user?.user_metadata?.full_name || email.split("@")[0].replace(/[._-]/g, " ");
+  const displayName = state.userProfile?.full_name || state.session?.user?.user_metadata?.full_name || email.split("@")[0].replace(/[._-]/g, " ");
   $("#user-email").textContent = email;
-  $("#user-name").textContent = titleCase(displayName);
+  $("#user-name").textContent = `${titleCase(displayName)} · ${currentRole()}`;
   $("#user-avatar").textContent = initials(displayName);
+}
+
+function currentRole() {
+  return state.userProfile?.role || "Admin";
+}
+
+function hasRole(...roles) {
+  return roles.includes(currentRole());
+}
+
+function isCoachOnly() {
+  return currentRole() === "Coach";
+}
+
+function canUseRoute(route) {
+  const role = currentRole();
+  const allowed = {
+    "Super Admin": Object.keys(pageMeta),
+    Admin: ["dashboard", "students", "course-groups", "batches", "finance", "coach-checklist", "attendance", "certificates", "email-center", "reports", "settings"],
+    Finance: ["dashboard", "students", "batches", "finance", "reports", "settings"],
+    Coach: ["dashboard", "coach-checklist", "attendance", "email-center", "settings"]
+  };
+  return (allowed[role] || allowed.Admin).includes(route);
+}
+
+function defaultRouteForRole() {
+  if (currentRole() === "Coach") return "coach-checklist";
+  if (currentRole() === "Finance") return "finance";
+  return "dashboard";
+}
+
+function applyRoleAccess() {
+  $$("[data-route]", $("#main-nav")).forEach(link => {
+    link.classList.toggle("hidden", !canUseRoute(link.dataset.route));
+  });
+  $("#global-add-student").classList.toggle("hidden", !hasRole("Super Admin", "Admin"));
 }
 
 function navigate(route) {
@@ -264,10 +375,15 @@ function navigate(route) {
 function routeFromHash() {
   if (!state.session) return;
   const route = (location.hash.replace(/^#/, "").split("?")[0] || "dashboard");
-  renderRoute(pageMeta[route] ? route : "dashboard");
+  const target = pageMeta[route] && canUseRoute(route) ? route : defaultRouteForRole();
+  renderRoute(target);
 }
 
 async function renderRoute(route) {
+  if (!canUseRoute(route)) {
+    toast("Limited access", `${currentRole()} accounts cannot open ${pageMeta[route]?.[0] || "this page"}.`, "warning");
+    return navigate(defaultRouteForRole());
+  }
   state.route = route;
   $$(".nav-link").forEach(link => link.classList.toggle("active", link.dataset.route === route));
   const [title, kicker] = pageMeta[route];
@@ -282,7 +398,9 @@ async function renderRoute(route) {
       batches: renderBatches,
       finance: renderFinance,
       "coach-checklist": renderCoachChecklist,
+      attendance: renderAttendance,
       certificates: renderCertificates,
+      "email-center": renderEmailCenter,
       reports: renderReports,
       settings: renderSettings
     };
@@ -296,6 +414,7 @@ async function renderRoute(route) {
 /* ---------- Dashboard ---------- */
 
 async function renderDashboard() {
+  if (isCoachOnly()) return renderCoachDashboard();
   const f = state.dashboardFilters;
   let query = state.supabase
     .from("students")
@@ -303,8 +422,10 @@ async function renderDashboard() {
       id, course_group_id, batch_id,
       course_group:course_groups(code,name),
       batch:batches(name,month,year,batch_number),
-      finance:finance_records(payment_status),
+      finance:finance_records(payment_status,training_access_status,refund_status),
       admin:admin_records(student_status),
+      enrollment:enrollment_records(source_name),
+      classroom:classroom_records(invite_status,joined_status),
       requirements(overall_status),
       certificates(status)
     `);
@@ -316,17 +437,20 @@ async function renderDashboard() {
   const students = data || [];
   const counts = {
     total: students.length,
-    pending: students.filter(s => s.finance?.payment_status === "Pending Payment").length,
-    downpayment: students.filter(s => s.finance?.payment_status === "Downpayment Paid").length,
+    pendingDeposit: students.filter(s => s.finance?.payment_status === "Pending Deposit").length,
+    partial: students.filter(s => s.finance?.payment_status === "Partial Payment").length,
     paid: students.filter(s => s.finance?.payment_status === "Fully Paid").length,
-    refunded: students.filter(s => s.finance?.payment_status === "Refunded").length,
+    paymentHold: students.filter(s => s.finance?.payment_status === "Payment Hold" || s.finance?.training_access_status === "Payment Hold").length,
+    refundRequested: students.filter(s => s.finance?.payment_status === "Refund Requested" || s.finance?.refund_status === "Requested").length,
+    notInvited: students.filter(s => (s.classroom?.invite_status || "Pending") !== "Yes").length,
     active: students.filter(s => s.admin?.student_status === "Active").length,
     inactive: students.filter(s => s.admin?.student_status === "Inactive").length,
     dropped: students.filter(s => s.admin?.student_status === "Dropped").length,
     completed: students.filter(s => s.admin?.student_status === "Completed").length,
-    review: students.filter(s => s.requirements?.overall_status === "For Review" || s.certificates?.some(c => c.status === "For Review")).length,
+    ready: students.filter(s => s.requirements?.overall_status === "Certificate Ready").length,
     issued: students.filter(s => s.certificates?.some(c => c.status === "Issued")).length
   };
+  const bySource = groupCounts(students, s => s.enrollment?.source_name || "Other");
   const byCourse = groupCounts(students, s => s.course_group?.code || "Unassigned");
   const byBatch = groupCounts(students, s => s.batch?.name || "Unassigned").slice(0, 8);
   $("#page-content").innerHTML = `
@@ -344,11 +468,17 @@ async function renderDashboard() {
     </section>
     <section class="metrics-grid">
       ${metricCard("Total Students", counts.total, "Across selected filters", "users", "teal", true)}
-      ${metricCard("Pending Payment", counts.pending, `${counts.downpayment} downpayments recorded`, "clock", "orange")}
+      ${metricCard("Pending Deposits", counts.pendingDeposit, `${counts.partial} partial payments`, "clock", "orange")}
       ${metricCard("Fully Paid", counts.paid, `${percent(counts.paid, counts.total)}% of students`, "check-circle", "green")}
-      ${metricCard("Certificate Review", counts.review, `${counts.issued} certificates issued`, "award", "purple")}
+      ${metricCard("Payment Hold", counts.paymentHold, `${counts.refundRequested} refund requests`, "alert-circle", "red")}
+      ${metricCard("Not Invited", counts.notInvited, "Google Classroom invite pending", "mail", "yellow")}
+      ${metricCard("Certificate Ready", counts.ready, `${counts.issued} certificates issued`, "award", "purple")}
     </section>
     <section class="dashboard-grid">
+      <article class="card">
+        <div class="card-head"><div><h3>Students by source</h3><p>Facebook, referral, webinar, and other leads</p></div></div>
+        <div class="card-body">${barList(bySource, counts.total)}</div>
+      </article>
       <article class="card">
         <div class="card-head"><div><h3>Students by course group</h3><p>Distribution across programs</p></div><button class="action-link" data-jump="course-groups">View groups</button></div>
         <div class="card-body">${barList(byCourse, counts.total)}</div>
@@ -374,10 +504,11 @@ async function renderDashboard() {
         <div class="card-head"><div><h3>Payment overview</h3><p>Finance status distribution</p></div><button class="action-link" data-jump="finance">Open finance</button></div>
         <div class="card-body">
           <div class="status-list">
-            ${statusListRow("Pending payment", counts.pending, "yellow")}
-            ${statusListRow("Downpayment paid", counts.downpayment, "blue")}
+            ${statusListRow("Pending deposit", counts.pendingDeposit, "yellow")}
+            ${statusListRow("Partial payment", counts.partial, "blue")}
             ${statusListRow("Fully paid", counts.paid, "green")}
-            ${statusListRow("Refunded", counts.refunded, "red")}
+            ${statusListRow("Payment hold", counts.paymentHold, "red")}
+            ${statusListRow("Refund requested", counts.refundRequested, "orange")}
           </div>
         </div>
       </article>
@@ -392,6 +523,63 @@ async function renderDashboard() {
   $$("[data-jump]", $("#page-content")).forEach(el => el.addEventListener("click", () => navigate(el.dataset.jump)));
 }
 
+async function renderCoachDashboard() {
+  const { data, error } = await state.supabase
+    .from("students")
+    .select(`
+      id,first_name,last_name,email,training_plan,training_access_status,course_group_id,
+      course_group:course_groups(id,code,name),
+      batch:batches(id,name),
+      classroom:classroom_records(invite_status,joined_status,final_coach_recommendation),
+      student_activities(status,score,activity:activities(*)),
+      requirements(overall_status)
+    `)
+    .order("last_name")
+    .limit(10000);
+  if (error) throw error;
+  const students = data || [];
+  const active = students.filter(s => (s.training_access_status || "Active") === "Active").length;
+  const hold = students.filter(s => ["Payment Watch", "Payment Hold", "Remove from Training"].includes(s.training_access_status)).length;
+  const notInvited = students.filter(s => (s.classroom?.invite_status || "Pending") !== "Yes").length;
+  const passedRecommended = students.filter(s => s.classroom?.final_coach_recommendation === "Passed").length;
+  $("#page-content").innerHTML = `
+    <section class="dashboard-welcome">
+      <div><h2>${greeting()}, Coach</h2><p>Your assigned students, classroom status, activity progress, and attendance tools are ready here.</p></div>
+      <div class="page-actions">
+        <button class="btn btn--outline btn--compact" data-jump="coach-checklist"><span data-icon="check-square"></span>Open checklist</button>
+        <button class="btn btn--outline btn--compact" data-jump="attendance"><span data-icon="calendar-check"></span>Open attendance</button>
+      </div>
+    </section>
+    <section class="metrics-grid">
+      ${metricCard("Assigned Students", students.length, "Visible through your batch assignments", "users", "teal", true)}
+      ${metricCard("Training Active", active, `${hold} need access attention`, "check-circle", "green")}
+      ${metricCard("Not Invited", notInvited, "Google Classroom invite pending", "mail", "yellow")}
+      ${metricCard("Recommended Passed", passedRecommended, "Final coach recommendation", "thumbs-up", "purple")}
+    </section>
+    <section class="card table-card">
+      <div class="card-head"><div><h3>Assigned student snapshot</h3><p>Finance amounts are intentionally hidden from coach accounts.</p></div></div>
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Student</th><th>Batch</th><th>Access</th><th>Classroom</th><th>Activities</th><th>Recommendation</th></tr></thead>
+        <tbody>${students.map(s => {
+          const activities = relevantStudentActivities(s);
+          const passed = activities.filter(a => a.status === "Passed").length;
+          return `<tr>
+            <td><button class="action-link student-cell" data-coach-student="${s.id}"><span class="student-avatar">${initials(fullName(s))}</span><span><strong>${escapeHtml(fullName(s))}</strong><small>${escapeHtml(s.email || "")}</small></span></button></td>
+            <td>${escapeHtml(s.batch?.name || "—")}</td>
+            <td>${statusBadge(s.training_access_status || "Active")}</td>
+            <td>${statusBadge(s.classroom?.invite_status || "Pending")} ${statusBadge(s.classroom?.joined_status || "Pending")}</td>
+            <td>${passed} / ${Math.max(activities.length, activeActivityCountForStudent(s))}</td>
+            <td>${statusBadge(s.classroom?.final_coach_recommendation || "Incomplete")}</td>
+          </tr>`;
+        }).join("")}</tbody>
+      </table></div>
+    </section>
+  `;
+  renderIcons($("#page-content"));
+  $$("[data-jump]", $("#page-content")).forEach(el => el.addEventListener("click", () => navigate(el.dataset.jump)));
+  bindCoachRows();
+}
+
 /* ---------- Students ---------- */
 
 async function renderStudents() {
@@ -402,10 +590,11 @@ async function renderStudents() {
   let query = state.supabase
     .from("students")
     .select(`
-      id, first_name, last_name, email, phone, coach, training_plan, course_group_id, batch_id, updated_at,
+      id, first_name, last_name, email, phone, coach, training_plan, training_access_status, course_group_id, batch_id, updated_at,
       course_group:course_groups(code,name),
       batch:batches(name,month,year,batch_number),
       finance:finance_records!inner(payment_status),
+      enrollment:enrollment_records!inner(source_name,enrollment_status,final_price),
       admin:admin_records!inner(student_status,concern_status),
       certificates!inner(status,certificate_type)
     `, { count: "exact" });
@@ -417,6 +606,8 @@ async function renderStudents() {
   if (f.batch) query = query.eq("batch_id", f.batch);
   if ((f.month || f.year) && !f.batch) query = query.in("batch_id", batchIdsForPeriod(f.month, f.year, f.courseGroup));
   if (f.plan) query = query.eq("training_plan", f.plan);
+  if (f.source) query = query.eq("enrollment.source_name", f.source);
+  if (f.access) query = query.eq("training_access_status", f.access);
   if (f.finance) query = query.eq("finance.payment_status", f.finance);
   if (f.admin) query = query.eq("admin.student_status", f.admin);
   if (f.certificate) query = query.eq("certificates.status", f.certificate);
@@ -433,10 +624,10 @@ async function renderStudents() {
     <section class="page-head">
       <div><h2>Student directory</h2><p>Search, filter, and manage every student record.</p></div>
       <div class="page-actions">
-        <button class="btn btn--outline btn--compact" id="import-students"><span data-icon="upload"></span>Import CSV</button>
+        ${hasRole("Super Admin", "Admin") ? `<button class="btn btn--outline btn--compact" id="import-students"><span data-icon="upload"></span>Import CSV</button>` : ""}
         <button class="btn btn--outline btn--compact" id="export-all"><span data-icon="download"></span>Export all</button>
         <button class="btn btn--outline btn--compact" id="export-menu"><span data-icon="download"></span>Export filtered</button>
-        <button class="btn btn--primary btn--compact" id="add-student"><span data-icon="plus"></span>Add student</button>
+        ${hasRole("Super Admin", "Admin") ? `<button class="btn btn--primary btn--compact" id="add-student"><span data-icon="plus"></span>Add student</button>` : ""}
       </div>
     </section>
     <section class="filters" id="student-filters">
@@ -446,6 +637,8 @@ async function renderStudents() {
       ${selectControl("month", "All months", APP.months.map((m, i) => [i + 1, m]), f.month)}
       ${yearSelect("year", f.year, "All years")}
       ${selectControl("plan", "All plans", APP.planOptions.map(v => [v, v]), f.plan)}
+      ${selectControl("source", "All sources", sourceOptions(), f.source)}
+      ${selectControl("access", "All access statuses", APP.trainingAccessStatuses.map(v => [v, v]), f.access)}
       ${selectControl("finance", "All payment statuses", APP.financeStatuses.map(v => [v, v]), f.finance)}
       ${selectControl("admin", "All student statuses", APP.studentStatuses.map(v => [v, v]), f.admin)}
       ${selectControl("certificate", "All certificate statuses", APP.certificateStatuses.map(v => [v, v]), f.certificate)}
@@ -455,7 +648,7 @@ async function renderStudents() {
       <strong><span id="selected-count">${state.selectedStudents.size}</span> selected</strong>
       <span class="bulk-spacer"></span>
       <button class="btn btn--outline btn--compact" id="clear-selection">Clear selection</button>
-      <button class="btn btn--danger-soft btn--compact" id="delete-selected"><span data-icon="trash"></span>Delete</button>
+      ${hasRole("Super Admin", "Admin") ? `<button class="btn btn--danger-soft btn--compact" id="delete-selected"><span data-icon="trash"></span>Delete</button>` : ""}
     </div>
     <section class="card table-card">
       ${students.length ? studentTable(students) : emptyState("users", "No students found", hasActiveFilters(f) ? "Try changing or clearing your filters." : "Import a CSV or add your first student to get started.", !hasActiveFilters(f) ? `<button class="btn btn--primary btn--compact" id="empty-add">Add student</button>` : "")}
@@ -473,7 +666,7 @@ function studentTable(students) {
       <table class="data-table">
         <thead><tr>
           <th class="checkbox-col"><input id="select-visible" type="checkbox" ${allVisibleSelected ? "checked" : ""} aria-label="Select all visible students"></th>
-          <th>Student name</th><th>Email</th><th>Phone</th><th>Course group</th><th>Batch name</th><th>Plan</th><th>Coach</th><th>Finance status</th><th>Student status</th><th>Certificate status</th><th>Last updated</th><th>Action</th>
+          <th>Student name</th><th>Email</th><th>Phone</th><th>Source</th><th>Course group</th><th>Batch name</th><th>Plan</th><th>Access</th><th>Coach</th><th>Finance status</th><th>Student status</th><th>Certificate status</th><th>Last updated</th><th>Action</th>
         </tr></thead>
         <tbody>
           ${students.map(student => `
@@ -485,9 +678,11 @@ function studentTable(students) {
               </button></td>
               <td>${escapeHtml(student.email || "—")}</td>
               <td>${escapeHtml(student.phone || "—")}</td>
+              <td>${escapeHtml(student.enrollment?.source_name || "Other")}</td>
               <td><span class="badge badge--teal">${escapeHtml(student.course_group?.code || "—")}</span></td>
               <td>${escapeHtml(student.batch?.name || "—")}</td>
               <td>${statusBadge(studentPlan(student))}</td>
+              <td>${statusBadge(student.training_access_status || "Active")}</td>
               <td>${escapeHtml(student.coach || "Unassigned")}</td>
               <td>${statusBadge(student.finance?.payment_status)}</td>
               <td>${statusBadge(student.admin?.student_status)}</td>
@@ -495,8 +690,8 @@ function studentTable(students) {
               <td>${formatRelativeDate(student.updated_at)}</td>
               <td><div class="row-actions">
                 <button class="icon-btn btn-icon-only" data-open-student="${student.id}" aria-label="Open student" title="Open profile"><span data-icon="eye"></span></button>
-                <button class="icon-btn btn-icon-only" data-edit-student="${student.id}" aria-label="Edit student" title="Edit student"><span data-icon="edit-2"></span></button>
-                <button class="icon-btn btn-icon-only text-danger" data-delete-student="${student.id}" aria-label="Delete student" title="Delete student"><span data-icon="trash-2"></span></button>
+                ${hasRole("Super Admin", "Admin") ? `<button class="icon-btn btn-icon-only" data-edit-student="${student.id}" aria-label="Edit student" title="Edit student"><span data-icon="edit-2"></span></button>
+                <button class="icon-btn btn-icon-only text-danger" data-delete-student="${student.id}" aria-label="Delete student" title="Delete student"><span data-icon="trash-2"></span></button>` : ""}
               </div></td>
             </tr>`).join("")}
         </tbody>
@@ -854,18 +1049,19 @@ async function renderFinance() {
   const { data, error } = await state.supabase
     .from("finance_records")
     .select(`
-      id, payment_status, amount_paid, balance, payment_method, payment_date, updated_at,
-      student:students!inner(id,first_name,last_name,email,course_group:course_groups(code),batch:batches(name))
+      id, payment_status, training_access_status, amount_paid, balance, payment_method, unionbank_reference, payment_date, due_date, refund_status, updated_at,
+      student:students!inner(id,first_name,last_name,email,training_access_status,course_group:course_groups(code),batch:batches(name))
     `)
     .order("updated_at", { ascending: false })
     .limit(10000);
   if (error) throw error;
   const records = data || [];
   const totals = {
-    pending: records.filter(r => r.payment_status === "Pending Payment").length,
-    downpayment: records.filter(r => r.payment_status === "Downpayment Paid").length,
+    pending: records.filter(r => r.payment_status === "Pending Deposit").length,
+    partial: records.filter(r => r.payment_status === "Partial Payment").length,
     paid: records.filter(r => r.payment_status === "Fully Paid").length,
-    refunded: records.filter(r => r.payment_status === "Refunded").length,
+    hold: records.filter(r => r.payment_status === "Payment Hold" || r.training_access_status === "Payment Hold").length,
+    refunds: records.filter(r => r.payment_status === "Refund Requested" || r.refund_status === "Requested").length,
     received: records.reduce((sum, r) => sum + Number(r.amount_paid || 0), 0)
   };
   $("#page-content").innerHTML = `
@@ -874,10 +1070,11 @@ async function renderFinance() {
       <div class="page-actions"><button class="btn btn--outline btn--compact" id="export-finance"><span data-icon="download"></span>Export finance</button></div>
     </section>
     <section class="metrics-grid">
-      ${metricCard("Pending Payment", totals.pending, "Awaiting first payment", "clock", "orange")}
-      ${metricCard("Downpayment Paid", totals.downpayment, "Partially paid students", "wallet", "purple")}
+      ${metricCard("Pending Deposit", totals.pending, "Awaiting deposit confirmation", "clock", "orange")}
+      ${metricCard("Partial Payment", totals.partial, "Staggered payment records", "wallet", "purple")}
       ${metricCard("Fully Paid", totals.paid, "Cleared payment records", "check-circle", "green")}
-      ${metricCard("Amount Received", formatCurrency(totals.received), `${totals.refunded} refunded records`, "trending-up", "teal", true)}
+      ${metricCard("Payment Hold", totals.hold, `${totals.refunds} refund requests`, "alert-circle", "red")}
+      ${metricCard("Amount Received", formatCurrency(totals.received), "Across matching records", "trending-up", "teal", true)}
     </section>
     <section class="filters" id="finance-filters">
       <div class="filter-search"><span data-icon="search"></span><input class="control" name="search" placeholder="Search student…"></div>
@@ -886,7 +1083,7 @@ async function renderFinance() {
     </section>
     <section class="card table-card">
       <div class="table-wrap ${records.length ? "" : "hidden"}"><table class="data-table">
-        <thead><tr><th>Student</th><th>Course group</th><th>Batch</th><th>Payment status</th><th>Amount paid</th><th>Balance</th><th>Method</th><th>Payment date</th><th>Action</th></tr></thead>
+        <thead><tr><th>Student</th><th>Course group</th><th>Batch</th><th>Payment status</th><th>Access</th><th>Amount paid</th><th>Balance</th><th>Method</th><th>Reference</th><th>Due date</th><th>Refund</th><th>Action</th></tr></thead>
         <tbody id="finance-table-body">${financeRows(records)}</tbody>
       </table></div>
       <div id="finance-empty" class="${records.length ? "hidden" : ""}">${emptyState("wallet", "No finance records found", "Try a different search or payment status.")}</div>
@@ -919,10 +1116,13 @@ function financeRows(records) {
       <td>${escapeHtml(record.student?.course_group?.code || "—")}</td>
       <td>${escapeHtml(record.student?.batch?.name || "—")}</td>
       <td>${statusBadge(record.payment_status)}</td>
+      <td>${statusBadge(record.training_access_status || record.student?.training_access_status || "Active")}</td>
       <td>${formatCurrency(record.amount_paid)}</td>
       <td>${formatCurrency(record.balance)}</td>
       <td>${escapeHtml(record.payment_method || "—")}</td>
-      <td>${formatDate(record.payment_date)}</td>
+      <td>${escapeHtml(record.unionbank_reference || "—")}</td>
+      <td>${formatDate(record.due_date || record.payment_date)}</td>
+      <td>${statusBadge(record.refund_status || "None")}</td>
       <td><button class="icon-btn btn-icon-only" data-finance-student="${record.student?.id}" title="Open finance profile"><span data-icon="edit-2"></span></button></td>
     </tr>`).join("");
 }
@@ -937,10 +1137,10 @@ async function renderCoachChecklist() {
   const { data, error } = await state.supabase
     .from("students")
     .select(`
-      id,first_name,last_name,email,coach,training_plan,course_group_id,
+      id,first_name,last_name,email,coach,training_plan,training_access_status,course_group_id,
       course_group:course_groups(id,code),
       batch:batches(name),
-      classroom:classroom_records(invite_status,date_sent,sent_by),
+      classroom:classroom_records(invite_status,joined_status,date_sent,sent_by,final_coach_recommendation),
       student_activities(status,score,activity:activities(*)),
       requirements(overall_status)
     `)
@@ -962,7 +1162,7 @@ async function renderCoachChecklist() {
     </section>
     <section class="card table-card">
       <div class="table-wrap ${students.length ? "" : "hidden"}"><table class="data-table">
-        <thead><tr><th>Student</th><th>Course group</th><th>Plan</th><th>Coach</th><th>Classroom invite</th><th>Activities passed</th><th>Average score</th><th>Requirement status</th><th>Action</th></tr></thead>
+        <thead><tr><th>Student</th><th>Course group</th><th>Plan</th><th>Access</th><th>Coach</th><th>Classroom</th><th>Activities</th><th>Average score</th><th>Recommendation</th><th>Requirement status</th><th>Action</th></tr></thead>
         <tbody id="coach-table-body">${coachRows(students)}</tbody>
       </table></div>
       <div id="coach-empty" class="${students.length ? "hidden" : ""}">${emptyState("check-square", "No students found", "Try changing the checklist filters.")}</div>
@@ -996,7 +1196,7 @@ async function renderCoachChecklist() {
 function coachRows(students) {
   return students.map(student => {
     const activities = relevantStudentActivities(student);
-    const passed = activities.filter(a => a.status === "Pass").length;
+    const passed = activities.filter(a => a.status === "Passed").length;
     const scored = activities.filter(a => a.score !== null && a.score !== "");
     const expectedActivities = activeActivityCountForStudent(student);
     const average = scored.length ? Math.round(scored.reduce((sum, a) => sum + Number(a.score), 0) / scored.length) : null;
@@ -1007,10 +1207,12 @@ function coachRows(students) {
         </button></td>
         <td><span class="badge badge--teal">${escapeHtml(student.course_group?.code || "—")}</span></td>
         <td>${statusBadge(studentPlan(student))}</td>
+        <td>${statusBadge(student.training_access_status || "Active")}</td>
         <td>${escapeHtml(student.coach || "Unassigned")}</td>
-        <td>${statusBadge(student.classroom?.invite_status || "Pending")}</td>
+        <td>${statusBadge(student.classroom?.invite_status || "Pending")} ${statusBadge(student.classroom?.joined_status || "Pending")}</td>
         <td>${passed} / ${Math.max(activities.length, expectedActivities)}</td>
         <td>${average === null ? "—" : `${average}%`}</td>
+        <td>${statusBadge(student.classroom?.final_coach_recommendation || "Incomplete")}</td>
         <td>${statusBadge(student.requirements?.overall_status || "For Review")}</td>
         <td><button class="icon-btn btn-icon-only" data-coach-student="${student.id}" title="Open coach checklist"><span data-icon="edit-2"></span></button></td>
       </tr>`;
@@ -1019,6 +1221,138 @@ function coachRows(students) {
 
 function bindCoachRows() {
   $$("[data-coach-student]").forEach(btn => btn.addEventListener("click", () => openStudentProfile(btn.dataset.coachStudent, "coaches")));
+}
+
+/* ---------- Attendance ---------- */
+
+async function renderAttendance() {
+  const [sessionsResult, studentsResult] = await Promise.all([
+    state.supabase
+      .from("attendance_sessions")
+      .select("*, batch:batches(id,name,course_group:course_groups(code))")
+      .order("session_date", { ascending: false })
+      .limit(300),
+    state.supabase
+      .from("students")
+      .select("id,first_name,last_name,email,batch_id,batch:batches(name)")
+      .order("last_name")
+      .limit(10000)
+  ]);
+  if (sessionsResult.error) throw sessionsResult.error;
+  if (studentsResult.error) throw studentsResult.error;
+  const sessions = sessionsResult.data || [];
+  const students = studentsResult.data || [];
+  $("#page-content").innerHTML = `
+    <section class="page-head">
+      <div><h2>Attendance</h2><p>Create class sessions per batch and mark Present, Late, Absent, or Excused.</p></div>
+    </section>
+    <section class="card">
+      <div class="card-body">
+        <form id="attendance-session-form" class="form-grid form-grid--3">
+          <label class="field"><span>Batch</span><select name="batch_id" required><option value="">Select batch</option>${optionsHtml(state.batches.map(b => [b.id, b.name]))}</select></label>
+          <label class="field"><span>Session Date</span><input name="session_date" type="date" value="${todayIso()}" required></label>
+          <label class="field"><span>Title</span><input name="title" placeholder="Class Session 1" required></label>
+          <label class="field span-2"><span>Notes</span><input name="notes" placeholder="Optional coach/admin notes"></label>
+          <div class="page-actions"><button class="btn btn--primary" id="create-attendance-session" type="button">Create Session</button></div>
+        </form>
+      </div>
+    </section>
+    <section class="card table-card">
+      <div class="card-head"><div><h3>Recent sessions</h3><p>${students.length} visible students across your permitted batches.</p></div></div>
+      <div class="table-wrap ${sessions.length ? "" : "hidden"}"><table class="data-table">
+        <thead><tr><th>Session</th><th>Batch</th><th>Date</th><th>Created</th><th>Action</th></tr></thead>
+        <tbody>${sessions.map(session => `
+          <tr>
+            <td>${escapeHtml(session.title)}</td>
+            <td>${escapeHtml(session.batch?.name || "—")}</td>
+            <td>${formatDate(session.session_date)}</td>
+            <td>${formatRelativeDate(session.created_at)}</td>
+            <td><button class="btn btn--outline btn--compact" data-open-attendance="${session.id}" data-batch-id="${session.batch_id}">Mark attendance</button></td>
+          </tr>`).join("")}</tbody>
+      </table></div>
+      <div class="${sessions.length ? "hidden" : ""}">${emptyState("calendar-check", "No attendance sessions yet", "Create a batch session to start marking attendance.")}</div>
+    </section>
+  `;
+  renderIcons($("#page-content"));
+  $("#create-attendance-session").addEventListener("click", createAttendanceSession);
+  $$("[data-open-attendance]").forEach(btn => btn.addEventListener("click", () => openAttendanceSession(btn.dataset.openAttendance, btn.dataset.batchId)));
+}
+
+async function createAttendanceSession() {
+  const form = $("#attendance-session-form");
+  if (!form.reportValidity()) return;
+  const values = normalizedFormValues(form);
+  const button = $("#create-attendance-session");
+  setButtonLoading(button, true, "Creating...");
+  const { error } = await state.supabase.from("attendance_sessions").insert({
+    ...values,
+    created_by: state.session?.user?.id || null
+  });
+  if (error) {
+    setButtonLoading(button, false);
+    return toast("Could not create session", friendlyError(error), "error");
+  }
+  toast("Attendance session created", "Open it to mark student attendance.", "success");
+  renderAttendance();
+}
+
+async function openAttendanceSession(sessionId, batchId) {
+  openModal({
+    title: "Mark attendance",
+    subtitle: "Loading batch students...",
+    size: "wide",
+    body: loadingState("Loading attendance...")
+  });
+  const [studentsResult, recordsResult, sessionResult] = await Promise.all([
+    state.supabase.from("students").select("id,first_name,last_name,email").eq("batch_id", batchId).order("last_name"),
+    state.supabase.from("attendance_records").select("*").eq("session_id", sessionId),
+    state.supabase.from("attendance_sessions").select("*,batch:batches(name)").eq("id", sessionId).single()
+  ]);
+  if (studentsResult.error || recordsResult.error || sessionResult.error) {
+    closeModal();
+    return toast("Could not load attendance", friendlyError(studentsResult.error || recordsResult.error || sessionResult.error), "error");
+  }
+  const byStudent = new Map((recordsResult.data || []).map(record => [record.student_id, record]));
+  openModal({
+    title: sessionResult.data.title,
+    subtitle: `${sessionResult.data.batch?.name || "Batch"} · ${formatDate(sessionResult.data.session_date)}`,
+    size: "wide",
+    body: `
+      <div class="activity-list attendance-mark-list">
+        ${(studentsResult.data || []).map(student => {
+          const record = byStudent.get(student.id) || {};
+          return `<form class="activity-row attendance-record-row" data-student-id="${student.id}">
+            <div class="activity-name">${escapeHtml(fullName(student))}<small>${escapeHtml(student.email || "")}</small></div>
+            <label class="field"><span>Status</span><select name="status">${optionsHtml(APP.attendanceStatuses, record.status || "Present")}</select></label>
+            <label class="field span-2"><span>Notes</span><input name="notes" value="${escapeAttr(record.notes || "")}"></label>
+          </form>`;
+        }).join("") || emptyState("users", "No students in this batch", "Assign students to this batch first.")}
+      </div>`,
+    footer: `<button class="btn btn--outline" data-close-modal>Cancel</button><button class="btn btn--primary" id="save-attendance-records">Save Attendance</button>`
+  });
+  renderIcons($("#modal-root"));
+  bindModalBase();
+  $("#save-attendance-records").addEventListener("click", () => saveAttendanceRecords(sessionId));
+}
+
+async function saveAttendanceRecords(sessionId) {
+  const rows = $$(".attendance-record-row").map(form => ({
+    session_id: sessionId,
+    student_id: form.dataset.studentId,
+    ...normalizedFormValues(form)
+  }));
+  const button = $("#save-attendance-records");
+  setButtonLoading(button, true, "Saving...");
+  const { error } = await state.supabase
+    .from("attendance_records")
+    .upsert(rows, { onConflict: "session_id,student_id" });
+  if (error) {
+    setButtonLoading(button, false);
+    return toast("Could not save attendance", friendlyError(error), "error");
+  }
+  closeModal();
+  toast("Attendance saved", `${rows.length} student record${rows.length === 1 ? "" : "s"} updated.`, "success");
+  renderAttendance();
 }
 
 function relevantStudentActivities(student) {
@@ -1155,16 +1489,130 @@ function bindCertificateRows() {
   $$("[data-certificate-student]").forEach(btn => btn.addEventListener("click", () => openStudentProfile(btn.dataset.certificateStudent, "certificates")));
 }
 
+/* ---------- Email Center ---------- */
+
+async function renderEmailCenter() {
+  const [studentsResult, logsResult] = await Promise.all([
+    state.supabase
+      .from("students")
+      .select("id,first_name,last_name,email,batch_id,course_group:course_groups(code),batch:batches(name)")
+      .order("last_name")
+      .limit(10000),
+    state.supabase
+      .from("email_logs")
+      .select("*,student:students(first_name,last_name,email),batch:batches(name)")
+      .order("created_at", { ascending: false })
+      .limit(50)
+  ]);
+  if (studentsResult.error) throw studentsResult.error;
+  if (logsResult.error) throw logsResult.error;
+  const students = studentsResult.data || [];
+  const logs = logsResult.data || [];
+  $("#page-content").innerHTML = `
+    <section class="page-head">
+      <div><h2>Email Center</h2><p>Create templated emails and log communication. Direct sending can be connected later through a Supabase Edge Function or SMTP provider.</p></div>
+    </section>
+    <section class="section-grid section-grid--sidebar">
+      <article class="card">
+        <div class="card-head"><div><h3>Compose email log</h3><p>TODO: connect this UI to an Edge Function for real sending.</p></div></div>
+        <div class="card-body">
+          <form id="email-log-form" class="form-grid">
+            <label class="field"><span>Template</span><select name="template">${optionsHtml(Object.keys(APP.emailTemplates), "Welcome to Sync2VA Training")}</select></label>
+            <label class="field"><span>Target</span><select name="target_type">${optionsHtml([["student", "One student"], ["batch", "Full batch"]], "student")}</select></label>
+            <label class="field span-2"><span>Student</span><select name="student_id"><option value="">Select student</option>${optionsHtml(students.map(s => [s.id, `${fullName(s)} · ${s.email || "No email"}`]))}</select></label>
+            <label class="field span-2"><span>Batch</span><select name="batch_id"><option value="">Select batch</option>${optionsHtml(state.batches.map(b => [b.id, b.name]))}</select></label>
+            <label class="field span-2"><span>Subject</span><input name="subject" required></label>
+            <label class="field span-2"><span>Body</span><textarea name="body" rows="8" required></textarea></label>
+          </form>
+          <div class="inline-alert">Emails are logged only in this version. For direct sending, create a Supabase Edge Function with SMTP/API credentials stored as server-side secrets.</div>
+          <div class="page-actions"><button class="btn btn--primary" id="log-email">Log Email</button></div>
+        </div>
+      </article>
+      <aside class="card">
+        <div class="card-head"><div><h3>Recent email logs</h3><p>Latest 50 records</p></div></div>
+        <div class="card-body">
+          <div class="notes-list">
+            ${logs.length ? logs.map(log => `
+              <article class="note-item">
+                <p><strong>${escapeHtml(log.subject)}</strong></p>
+                <small>${escapeHtml(log.template || "Custom")} · ${formatDateTime(log.created_at)} · ${escapeHtml(log.student ? fullName(log.student) : log.batch?.name || "Multiple recipients")}</small>
+              </article>`).join("") : emptyState("mail", "No email logs yet", "Logged email drafts will appear here.")}
+          </div>
+        </div>
+      </aside>
+    </section>
+  `;
+  renderIcons($("#page-content"));
+  const form = $("#email-log-form");
+  const fillTemplate = () => {
+    const template = APP.emailTemplates[form.elements.template.value];
+    if (!template) return;
+    form.elements.subject.value = template.subject;
+    form.elements.body.value = template.body;
+  };
+  form.elements.template.addEventListener("change", fillTemplate);
+  fillTemplate();
+  $("#log-email").addEventListener("click", () => logEmail(students));
+}
+
+async function logEmail(students) {
+  const form = $("#email-log-form");
+  if (!form.reportValidity()) return;
+  const values = normalizedFormValues(form);
+  if (values.target_type === "student" && !values.student_id) return toast("Select a student", "Choose one student or switch the target to Full batch.", "warning");
+  if (values.target_type === "batch" && !values.batch_id) return toast("Select a batch", "Choose a batch or switch the target to One student.", "warning");
+  const targetStudents = values.target_type === "student"
+    ? students.filter(s => s.id === values.student_id)
+    : students.filter(s => s.batch_id === values.batch_id);
+  const recipients = targetStudents.map(s => s.email).filter(Boolean);
+  if (!recipients.length) return toast("No recipient emails", "The selected target does not have student emails.", "warning");
+  const firstStudent = targetStudents[0] || {};
+  const batch = state.batches.find(b => b.id === values.batch_id) || firstStudent.batch || {};
+  const body = applyEmailTemplate(values.body, firstStudent, batch);
+  const subject = applyEmailTemplate(values.subject, firstStudent, batch);
+  const button = $("#log-email");
+  setButtonLoading(button, true, "Logging...");
+  const { error } = await state.supabase.from("email_logs").insert({
+    sent_by: state.session?.user?.id || null,
+    student_id: values.target_type === "student" ? values.student_id : null,
+    batch_id: values.target_type === "batch" ? values.batch_id : null,
+    recipients,
+    template: values.template,
+    subject,
+    body,
+    status: "Logged",
+    notes: "Logged from frontend UI. TODO: send through Supabase Edge Function/SMTP."
+  });
+  if (error) {
+    setButtonLoading(button, false);
+    return toast("Could not log email", friendlyError(error), "error");
+  }
+  toast("Email logged", `${recipients.length} recipient${recipients.length === 1 ? "" : "s"} recorded.`, "success");
+  renderEmailCenter();
+}
+
+function applyEmailTemplate(text, student = {}, batch = {}) {
+  return String(text || "")
+    .replaceAll("{{student_name}}", fullName(student))
+    .replaceAll("{{course_group}}", student.course_group?.code || "")
+    .replaceAll("{{batch_name}}", student.batch?.name || batch.name || "");
+}
+
 /* ---------- Reports ---------- */
 
 function renderReports() {
   const reports = [
     ["all", "All students", "Complete student directory", "users"],
+    ["source", "Students by source", "Facebook, referral, webinar, or other", "users"],
     ["batch", "Students by batch", "Choose a monthly batch", "layers"],
     ["course", "Students by course group", "Choose a program", "book"],
-    ["pending", "Pending payment", "Students awaiting payment", "clock"],
+    ["finance", "Finance report", "Payment status, access, balances", "wallet"],
+    ["installments", "Payment installment report", "Due dates and installment status", "clock"],
+    ["refunds", "Refund report", "Refund requests and outcomes", "refresh-cw"],
+    ["coach-progress", "Coach progress report", "Activities, scores, recommendation", "check-square"],
+    ["attendance", "Attendance report", "Session attendance records", "calendar-check"],
+    ["pending", "Pending deposits", "Students awaiting deposit", "clock"],
     ["paid", "Fully paid", "Payment-cleared students", "check-circle"],
-    ["refunded", "Refunded", "Refunded payment records", "refresh-cw"],
     ["ready", "Certificate-ready", "All requirements cleared", "award"],
     ["issued", "Issued certificates", "Certificate issuance register", "file-text"]
   ];
@@ -1194,10 +1642,15 @@ function renderReports() {
 async function runReport(type) {
   if (type === "batch") return openReportPicker("batch");
   if (type === "course") return openReportPicker("course");
+  if (type === "source") return openReportPicker("source");
+  if (type === "finance") return exportFinanceReport();
+  if (type === "installments") return exportPaymentInstallments();
+  if (type === "refunds") return exportRefundReport();
+  if (type === "coach-progress") return exportCoachProgress();
+  if (type === "attendance") return exportAttendanceReport();
   const filters = {};
-  if (type === "pending") filters.finance = "Pending Payment";
+  if (type === "pending") filters.finance = "Pending Deposit";
   if (type === "paid") filters.finance = "Fully Paid";
-  if (type === "refunded") filters.finance = "Refunded";
   if (type === "ready") filters.requirement = "Certificate Ready";
   if (type === "issued") filters.certificate = "Issued";
   await exportStudents(filters, `sync2va-${type}-report.csv`);
@@ -1205,24 +1658,31 @@ async function runReport(type) {
 
 function openReportPicker(type) {
   const isBatch = type === "batch";
+  const isSource = type === "source";
   openModal({
-    title: `Export students by ${isBatch ? "batch" : "course group"}`,
+    title: `Export students by ${isBatch ? "batch" : isSource ? "source" : "course group"}`,
     subtitle: "Select the group to include in this CSV report.",
     size: "small",
-    body: `<label class="field"><span>${isBatch ? "Batch" : "Course Group"}</span><select id="report-picker" required>
-      <option value="">Select ${isBatch ? "batch" : "course group"}</option>
-      ${optionsHtml(isBatch ? state.batches.map(b => [b.id, b.name]) : state.courseGroups.map(c => [c.id, `${c.code} — ${c.name}`]))}
+    body: `<label class="field"><span>${isBatch ? "Batch" : isSource ? "Source" : "Course Group"}</span><select id="report-picker" required>
+      <option value="">Select ${isBatch ? "batch" : isSource ? "source" : "course group"}</option>
+      ${optionsHtml(reportPickerOptions(type))}
     </select></label>`,
     footer: `<button class="btn btn--outline" data-close-modal>Cancel</button><button class="btn btn--primary" id="run-picked-report">Export CSV</button>`
   });
   $("#run-picked-report").addEventListener("click", async () => {
     const value = $("#report-picker").value;
-    if (!value) return toast("Choose a value", `Select a ${isBatch ? "batch" : "course group"} first.`, "warning");
+    if (!value) return toast("Choose a value", `Select a ${isBatch ? "batch" : isSource ? "source" : "course group"} first.`, "warning");
     const button = $("#run-picked-report");
     setButtonLoading(button, true, "Exporting…");
-    await exportStudents({ [isBatch ? "batch" : "courseGroup"]: value }, `sync2va-${type}-report.csv`);
+    await exportStudents({ [isBatch ? "batch" : isSource ? "source" : "courseGroup"]: value }, `sync2va-${type}-report.csv`);
     closeModal();
   });
+}
+
+function reportPickerOptions(type) {
+  if (type === "batch") return state.batches.map(b => [b.id, b.name]);
+  if (type === "source") return sourceOptions();
+  return state.courseGroups.map(c => [c.id, `${c.code} — ${c.name}`]);
 }
 
 /* ---------- Settings ---------- */
@@ -1237,7 +1697,7 @@ function renderSettings() {
         <div class="card-body settings-content">
           <h3>Supabase connection</h3>
           <p>Only the public Project URL and anon key belong here. Student data remains in Supabase.</p>
-          <div class="connection-status"><span data-icon="check-circle"></span><span>Connected as <strong>${escapeHtml(email)}</strong></span></div>
+          <div class="connection-status"><span data-icon="check-circle"></span><span>Connected as <strong>${escapeHtml(email)}</strong> · Role: <strong>${escapeHtml(currentRole())}</strong></span></div>
           <form id="settings-connection-form">
             <label class="field"><span>Supabase Project URL</span><input name="url" type="url" value="${escapeAttr(config.url)}" placeholder="https://your-project.supabase.co" required></label>
             <label class="field"><span>Supabase Anon Key</span><textarea name="key" rows="4" placeholder="Public anon key" required>${escapeHtml(config.key)}</textarea><small class="field-hint">Never paste a service role key into frontend code.</small></label>
@@ -1248,7 +1708,8 @@ function renderSettings() {
           </form>
           <div class="divider"></div>
           <h3>Database setup</h3>
-          <p>Run <code>supabase-schema.sql</code> in the Supabase SQL Editor before using a new project. It creates UUID tables, indexes, triggers, reference data, and authenticated-user RLS policies.</p>
+          <p>Run <code>supabase-schema.sql</code> in the Supabase SQL Editor before using a new project. It creates UUID tables, indexes, triggers, role-aware RLS policies, attendance, email logs, payment plans, and enrollment pricing records.</p>
+          <div class="inline-alert">After the first schema run, add rows to <code>profiles</code> for each Supabase Auth user and assign one role: Super Admin, Admin, Finance, or Coach.</div>
         </div>
       </article>
       <aside class="card">
@@ -1303,11 +1764,15 @@ async function fetchStudent(id) {
       course_group:course_groups(id,code,name),
       batch:batches(id,name,month,year,batch_number),
       finance:finance_records(*),
+      enrollment:enrollment_records(*,source:student_sources(*)),
+      payment_plan:payment_plans(*),
+      payment_installments(*),
       admin:admin_records(*),
       classroom:classroom_records(*),
       student_activities(*,activity:activities(*)),
       requirements(*),
       certificates(*),
+      attendance_records(*,session:attendance_sessions(*)),
       notes:student_notes(*)
     `)
     .eq("id", id)
@@ -1430,7 +1895,7 @@ function renderStudentProfile() {
           <button class="icon-btn" data-close-modal aria-label="Close profile"><span data-icon="x"></span></button>
         </div>
         <nav class="profile-tabs">
-          ${["overview", "plan", "finance", "admin", "coaches", "requirements", "certificates", "notes"].map(tab => `<button class="profile-tab ${state.profileTab === tab ? "active" : ""}" data-profile-tab="${tab}">${titleCase(tab)}</button>`).join("")}
+          ${profileTabs().map(tab => `<button class="profile-tab ${state.profileTab === tab.id ? "active" : ""}" data-profile-tab="${tab.id}">${escapeHtml(tab.label)}</button>`).join("")}
         </nav>
         <div id="profile-content" class="profile-content">${profileTabHtml(state.profileTab)}</div>
       </section>
@@ -1448,18 +1913,42 @@ function renderStudentProfile() {
   bindProfileTab();
 }
 
+function profileTabs() {
+  const tabs = [
+    ["overview", "Overview"],
+    ["enrollment", "Enrollment & Pricing"],
+    ["finance", "Finance"],
+    ["payment-plan", "Payment Plan"],
+    ["admin", "Admin"],
+    ["coaches", "Coaches"],
+    ["attendance", "Attendance"],
+    ["requirements", "Requirements"],
+    ["certificates", "Certificates"],
+    ["notes", "Notes"]
+  ];
+  if (isCoachOnly()) {
+    return tabs.filter(([id]) => ["overview", "coaches", "attendance", "notes"].includes(id)).map(([id, label]) => ({ id, label }));
+  }
+  if (currentRole() === "Finance") {
+    return tabs.filter(([id]) => ["overview", "enrollment", "finance", "payment-plan", "notes"].includes(id)).map(([id, label]) => ({ id, label }));
+  }
+  return tabs.map(([id, label]) => ({ id, label }));
+}
+
 function profileTabHtml(tab) {
   const s = state.profile;
   const renderers = {
     overview: () => `
-      <div class="profile-section-head"><h3>Student overview</h3><button class="btn btn--outline btn--compact" id="profile-edit-student"><span data-icon="edit-2"></span>Edit details</button></div>
+      <div class="profile-section-head"><h3>Student overview</h3>${hasRole("Super Admin", "Admin") ? `<button class="btn btn--outline btn--compact" id="profile-edit-student"><span data-icon="edit-2"></span>Edit details</button>` : ""}</div>
       <div class="detail-grid">
         ${detailItem("Full name", fullName(s))}
         ${detailItem("Email", s.email)}
         ${detailItem("Phone", s.phone)}
+        ${detailItem("Source", s.enrollment?.source_name || s.enrollment?.source?.name || "Other")}
         ${detailItem("Course group", `${s.course_group?.code || "—"} — ${s.course_group?.name || "—"}`)}
         ${detailItem("Batch", s.batch?.name)}
         ${detailItem("Plan", studentPlan(s))}
+        ${detailItem("Training access", s.training_access_status || "Active")}
         ${detailItem("Coach", s.coach || "Unassigned")}
         ${detailItem("Finance", s.finance?.payment_status)}
         ${detailItem("Student status", s.admin?.student_status)}
@@ -1467,15 +1956,17 @@ function profileTabHtml(tab) {
         ${detailItem("Created", formatDate(s.created_at))}
         ${detailItem("Last updated", formatDateTime(s.updated_at))}
       </div>`,
-    plan: () => planTabHtml(s),
+    enrollment: () => enrollmentTabHtml(s),
     finance: () => financeTabHtml(s.finance || {}),
+    "payment-plan": () => paymentPlanTabHtml(s),
     admin: () => adminTabHtml(s.admin || {}),
     coaches: () => coachesTabHtml(s),
+    attendance: () => attendanceTabHtml(s),
     requirements: () => requirementsTabHtml(s.requirements || {}),
     certificates: () => certificatesTabHtml(s.certificates || []),
     notes: () => notesTabHtml(s.notes || [])
   };
-  return renderers[tab]();
+  return (renderers[tab] || renderers.overview)();
 }
 
 function planTabHtml(student) {
@@ -1506,18 +1997,91 @@ function planTabHtml(student) {
     <div class="page-actions"><button class="btn btn--primary" id="save-profile-plan">Save Plan</button></div>`;
 }
 
+function enrollmentTabHtml(student) {
+  const record = student.enrollment || {};
+  const plan = studentPlan(student);
+  const intensiveCount = activeActivityCountForStudent({ ...student, training_plan: "2 Weeks" });
+  const oneMonthCount = activeActivityCountForStudent({ ...student, training_plan: "1 Month" });
+  const sourceName = record.source_name || record.source?.name || "Other";
+  return `
+    <h3>Enrollment and pricing</h3>
+    <form id="profile-enrollment-form" class="form-grid">
+      <label class="field"><span>Source</span><select name="source_name">${optionsHtml(sourceOptions(), sourceName)}</select></label>
+      <label class="field"><span>Training Plan</span><select name="training_plan">${optionsHtml(APP.planOptions, plan)}</select></label>
+      <label class="field"><span>Regular Price</span><input name="regular_price" type="number" min="0" step="0.01" value="${escapeAttr(record.regular_price ?? 0)}"></label>
+      <label class="field"><span>Discount Type</span><select name="discount_type">${optionsHtml(["None", "Referral", "Webinar", "Fixed", "Percentage", "Custom"], record.discount_type || "None")}</select></label>
+      <label class="field"><span>Discount Amount</span><input name="discount_amount" type="number" min="0" step="0.01" value="${escapeAttr(record.discount_amount ?? 0)}"></label>
+      <label class="field"><span>Final Price</span><input name="final_price" type="number" min="0" step="0.01" value="${escapeAttr(record.final_price ?? 0)}"></label>
+      <label class="field"><span>Enrollment Status</span><select name="enrollment_status">${optionsHtml(["Pending Deposit", "Officially Enrolled", "Cancelled", "Completed"], record.enrollment_status || "Pending Deposit")}</select></label>
+      <label class="field"><span>Messenger Group Added</span><select name="messenger_group_added">${optionsHtml([["true", "Yes"], ["false", "No"]], String(record.messenger_group_added ?? false))}</select></label>
+      <label class="field"><span>Finance Exception Approved</span><select name="finance_exception_approved">${optionsHtml([["true", "Yes"], ["false", "No"]], String(record.finance_exception_approved ?? false))}</select></label>
+      <div class="detail-item"><small>2 Weeks</small><strong>Intensive activities only (${intensiveCount})</strong></div>
+      <div class="detail-item"><small>1 Month</small><strong>Intensive + CAP activities (${oneMonthCount})</strong></div>
+      <label class="field span-2"><span>Enrollment Notes</span><textarea name="notes">${escapeHtml(record.notes || "")}</textarea></label>
+    </form>
+    <div class="page-actions"><button class="btn btn--primary" id="save-profile-enrollment">Save Enrollment</button></div>`;
+}
+
 function financeTabHtml(record) {
+  if (isCoachOnly()) return `<div class="inline-alert">Coach accounts only see training access status in the Coach Checklist, not exact payment details.</div>`;
   return `
     <h3>Finance status</h3>
     <form id="profile-finance-form" class="form-grid">
-      <label class="field"><span>Payment Status</span><select name="payment_status">${optionsHtml(APP.financeStatuses, record.payment_status || "Pending Payment")}</select></label>
-      <label class="field"><span>Payment Method</span><select name="payment_method"><option value="">Select method</option>${optionsHtml(["GCash", "Bank Transfer", "PayPal", "Cash", "Other"], record.payment_method)}</select></label>
+      <label class="field"><span>Payment Status</span><select name="payment_status">${optionsHtml(APP.financeStatuses, record.payment_status || "Pending Deposit")}</select></label>
+      <label class="field"><span>Training Access Status</span><select name="training_access_status">${optionsHtml(APP.trainingAccessStatuses, record.training_access_status || "Active")}</select></label>
+      <label class="field"><span>Payment Method</span><select name="payment_method"><option value="">Select method</option>${optionsHtml(APP.paymentMethods, record.payment_method || "UnionBank")}</select></label>
+      <label class="field"><span>UnionBank Reference #</span><input name="unionbank_reference" value="${escapeAttr(record.unionbank_reference || "")}"></label>
       <label class="field"><span>Amount Paid</span><input name="amount_paid" type="number" min="0" step="0.01" value="${escapeAttr(record.amount_paid ?? "0")}"></label>
       <label class="field"><span>Balance</span><input name="balance" type="number" min="0" step="0.01" value="${escapeAttr(record.balance ?? "0")}"></label>
       <label class="field"><span>Payment Date</span><input name="payment_date" type="date" value="${record.payment_date || ""}"></label>
+      <label class="field"><span>Due Date</span><input name="due_date" type="date" value="${record.due_date || ""}"></label>
+      <label class="field"><span>Refund Requested</span><select name="refund_requested">${optionsHtml([["true", "Yes"], ["false", "No"]], String(record.refund_requested ?? false))}</select></label>
+      <label class="field"><span>Refund Status</span><select name="refund_status">${optionsHtml(APP.refundStatuses, record.refund_status || "None")}</select></label>
+      <label class="field"><span>Refund Date</span><input name="refund_date" type="date" value="${record.refund_date || ""}"></label>
+      <label class="field"><span>Refund Reason</span><input name="refund_reason" value="${escapeAttr(record.refund_reason || "")}"></label>
       <label class="field span-2"><span>Finance Notes</span><textarea name="notes">${escapeHtml(record.notes || "")}</textarea></label>
     </form>
     <div class="page-actions"><button class="btn btn--primary" id="save-profile-finance">Save Finance Status</button></div>`;
+}
+
+function paymentPlanTabHtml(student) {
+  if (isCoachOnly()) return `<div class="inline-alert">Payment plan details are hidden from Coach accounts.</div>`;
+  const plan = student.payment_plan || {};
+  const installments = [...(student.payment_installments || [])].sort((a, b) => a.installment_number - b.installment_number);
+  const rows = installments.length ? installments : [{ installment_number: 1, label: "Payment 1", amount_due: plan.total_contract_amount || student.enrollment?.final_price || 0, amount_paid: 0, payment_status: "Pending" }];
+  const totalPaid = rows.reduce((sum, row) => sum + Number(row.amount_paid || 0), 0);
+  const totalDue = rows.reduce((sum, row) => sum + Number(row.amount_due || 0), 0);
+  const balance = Math.max(totalDue - totalPaid, 0);
+  return `
+    <h3>Payment plan</h3>
+    <form id="profile-payment-plan-form" class="form-grid">
+      <label class="field"><span>Payment Plan Type</span><select name="plan_type">${optionsHtml(APP.paymentPlanTypes, plan.plan_type || "Full Payment")}</select></label>
+      <label class="field"><span>Number of Payments</span><input name="number_of_payments" type="number" min="1" max="5" value="${escapeAttr(plan.number_of_payments || rows.length || 1)}"></label>
+      <label class="field"><span>Deposit Amount</span><input name="deposit_amount" type="number" min="0" step="0.01" value="${escapeAttr(plan.deposit_amount ?? 0)}"></label>
+      <label class="field"><span>Total Contract Amount</span><input name="total_contract_amount" type="number" min="0" step="0.01" value="${escapeAttr(plan.total_contract_amount || totalDue || student.enrollment?.final_price || 0)}"></label>
+      <div class="detail-item"><small>Total Paid</small><strong>${formatCurrency(totalPaid)}</strong></div>
+      <div class="detail-item"><small>Balance</small><strong>${formatCurrency(balance)}</strong></div>
+      <label class="field span-2"><span>Payment Plan Notes</span><textarea name="notes">${escapeHtml(plan.notes || "")}</textarea></label>
+    </form>
+    <div class="profile-section-head"><h3>Installments</h3><small class="muted">Deposit plus up to 4 succeeding payments</small></div>
+    <div class="activity-list payment-installments-list">
+      ${rows.map(row => installmentRowHtml(row)).join("")}
+    </div>
+    <div class="page-actions"><button class="btn btn--primary" id="save-profile-payment-plan">Save Payment Plan</button></div>`;
+}
+
+function installmentRowHtml(row) {
+  return `
+    <form class="activity-row payment-installment-row" data-installment-id="${row.id || ""}">
+      <div class="activity-name">Payment ${escapeHtml(row.installment_number || "")}<small>${escapeHtml(row.label || (row.installment_number === 1 ? "Deposit" : "Installment"))}</small></div>
+      <label class="field"><span>Due Date</span><input name="due_date" type="date" value="${row.due_date || ""}"></label>
+      <label class="field"><span>Amount Due</span><input name="amount_due" type="number" min="0" step="0.01" value="${escapeAttr(row.amount_due ?? 0)}"></label>
+      <label class="field"><span>Amount Paid</span><input name="amount_paid" type="number" min="0" step="0.01" value="${escapeAttr(row.amount_paid ?? 0)}"></label>
+      <label class="field"><span>Status</span><select name="payment_status">${optionsHtml(["Pending", "Partial", "Paid", "Overdue", "Waived", "Refunded"], row.payment_status || "Pending")}</select></label>
+      <label class="field"><span>Reference #</span><input name="unionbank_reference" value="${escapeAttr(row.unionbank_reference || "")}"></label>
+      <input type="hidden" name="installment_number" value="${escapeAttr(row.installment_number || 1)}">
+      <input type="hidden" name="label" value="${escapeAttr(row.label || "")}">
+    </form>`;
 }
 
 function adminTabHtml(record) {
@@ -1542,23 +2106,50 @@ function coachesTabHtml(student) {
     <h3>Google Classroom checklist</h3>
     <form id="profile-classroom-form" class="form-grid">
       <label class="field"><span>Google Classroom Invite Sent</span><select name="invite_status">${optionsHtml(["Yes", "No", "Pending"], classroom.invite_status || "Pending")}</select></label>
+      <label class="field"><span>Joined Google Classroom</span><select name="joined_status">${optionsHtml(["Yes", "No", "Pending"], classroom.joined_status || "Pending")}</select></label>
       <label class="field"><span>Date Sent</span><input name="date_sent" type="date" value="${classroom.date_sent || ""}"></label>
       <label class="field"><span>Sent By</span><input name="sent_by" value="${escapeAttr(classroom.sent_by || "")}"></label>
+      <label class="field"><span>Final Coach Recommendation</span><select name="final_coach_recommendation">${optionsHtml(APP.coachRecommendations, classroom.final_coach_recommendation || "Incomplete")}</select></label>
+      <label class="field"><span>Coach Comment</span><input name="coach_comment" value="${escapeAttr(classroom.coach_comment || "")}"></label>
       <label class="field span-2"><span>Notes</span><textarea name="notes">${escapeHtml(classroom.notes || "")}</textarea></label>
     </form>
     <div class="page-actions"><button class="btn btn--primary btn--compact" id="save-profile-classroom">Save Classroom Checklist</button></div>
-    <div class="profile-section-head"><h3>Activities checklist</h3><small class="muted">${activityRows.filter(a => a.status === "Pass").length} of ${Math.max(activityRows.length, expectedActivities)} passed</small></div>
+    <div class="profile-section-head"><h3>Activities checklist</h3><small class="muted">${activityRows.filter(a => a.status === "Passed").length} of ${Math.max(activityRows.length, expectedActivities)} passed</small></div>
     <div class="activity-list">
       ${activityRows.length ? activityRows.map(row => `
         <form class="activity-row" data-activity-row="${row.id}">
           <div class="activity-name">${escapeHtml(row.activity?.name || "Activity")}<small>${escapeHtml(row.activity ? activityTrack(row.activity) : "Activity")}</small></div>
-          <label class="field"><span>Status</span><select name="status">${optionsHtml(APP.activityStatuses, row.status || "Pending")}</select></label>
+          <label class="field"><span>Status</span><select name="status">${optionsHtml(APP.activityStatuses, row.status || "Not Started")}</select></label>
           <label class="field"><span>Score</span><input name="score" type="number" min="0" max="100" value="${escapeAttr(row.score ?? "")}"></label>
-          <label class="field"><span>Coach Notes</span><input name="coach_notes" value="${escapeAttr(row.coach_notes || "")}"></label>
+          <label class="field"><span>Coach Comment</span><input name="coach_comment" value="${escapeAttr(row.coach_comment || row.coach_notes || "")}"></label>
           <label class="field"><span>Date Checked</span><input name="date_checked" type="date" value="${row.date_checked || ""}"></label>
           <button class="btn btn--outline btn--compact save-activity" type="button">Save</button>
         </form>`).join("") : `<div class="inline-alert">No activity rows exist. Confirm that the database trigger and default activities were installed from the SQL schema.</div>`}
     </div>`;
+}
+
+function attendanceTabHtml(student) {
+  const records = [...(student.attendance_records || [])].sort((a, b) => new Date(b.session?.session_date || b.created_at) - new Date(a.session?.session_date || a.created_at));
+  const counted = records.filter(r => ["Present", "Late", "Absent", "Excused"].includes(r.status));
+  const attended = counted.filter(r => ["Present", "Late", "Excused"].includes(r.status)).length;
+  const percentage = counted.length ? Math.round((attended / counted.length) * 100) : 0;
+  return `
+    <h3>Attendance summary</h3>
+    <div class="requirement-banner ${percentage >= 80 ? "requirement-banner--ready" : "requirement-banner--review"}">
+      <div><strong>${counted.length ? `${percentage}% attendance` : "No attendance yet"}</strong><small>${attended} attended/excused of ${counted.length} marked sessions.</small></div>
+      <span data-icon="calendar-check"></span>
+    </div>
+    <div class="table-wrap ${records.length ? "" : "hidden"}"><table class="data-table">
+      <thead><tr><th>Session</th><th>Date</th><th>Status</th><th>Notes</th></tr></thead>
+      <tbody>${records.map(record => `
+        <tr>
+          <td>${escapeHtml(record.session?.title || "Class session")}</td>
+          <td>${formatDate(record.session?.session_date)}</td>
+          <td>${statusBadge(record.status)}</td>
+          <td>${escapeHtml(record.notes || "—")}</td>
+        </tr>`).join("")}</tbody>
+    </table></div>
+    ${records.length ? "" : emptyState("calendar-check", "No attendance records yet", "Create sessions from the Attendance page and mark this student's status.")}`;
 }
 
 function requirementsTabHtml(record) {
@@ -1617,13 +2208,55 @@ function notesTabHtml(notes) {
 function bindProfileTab() {
   $("#profile-edit-student")?.addEventListener("click", () => openStudentForm(state.profile));
   $("#save-profile-plan")?.addEventListener("click", saveProfilePlan);
+  $("#save-profile-enrollment")?.addEventListener("click", saveEnrollment);
   $("#save-profile-finance")?.addEventListener("click", () => saveProfileRecord("finance_records", "#profile-finance-form", state.profile.finance?.id, "Finance status saved"));
+  $("#save-profile-payment-plan")?.addEventListener("click", savePaymentPlan);
   $("#save-profile-admin")?.addEventListener("click", () => saveProfileRecord("admin_records", "#profile-admin-form", state.profile.admin?.id, "Admin status saved"));
   $("#save-profile-classroom")?.addEventListener("click", () => saveProfileRecord("classroom_records", "#profile-classroom-form", state.profile.classroom?.id, "Classroom checklist saved"));
   $("#save-profile-requirements")?.addEventListener("click", saveRequirements);
   $$(".save-activity").forEach(button => button.addEventListener("click", () => saveActivity(button)));
   $$(".save-certificate").forEach(button => button.addEventListener("click", () => saveCertificate(button)));
   $("#add-note")?.addEventListener("click", addStudentNote);
+}
+
+async function saveEnrollment() {
+  const form = $("#profile-enrollment-form");
+  if (!form.reportValidity()) return;
+  const values = normalizedFormValues(form);
+  const button = $("#save-profile-enrollment");
+  const source = state.studentSources.find(item => item.name === values.source_name);
+  const enrollmentPayload = {
+    student_id: state.profile.id,
+    source_id: source?.id || null,
+    source_name: values.source_name || "Other",
+    regular_price: Number(values.regular_price || 0),
+    discount_type: values.discount_type || "None",
+    discount_amount: Number(values.discount_amount || 0),
+    final_price: Number(values.final_price || 0),
+    enrollment_status: values.enrollment_status || "Pending Deposit",
+    messenger_group_added: values.messenger_group_added === "true",
+    finance_exception_approved: values.finance_exception_approved === "true",
+    notes: values.notes
+  };
+  setButtonLoading(button, true, "Saving...");
+  const { error: studentError } = await state.supabase
+    .from("students")
+    .update({ training_plan: values.training_plan || "2 Weeks" })
+    .eq("id", state.profile.id);
+  if (studentError) {
+    setButtonLoading(button, false);
+    return toast("Could not save plan", friendlyError(studentError), "error");
+  }
+  const { error } = await state.supabase
+    .from("enrollment_records")
+    .upsert(enrollmentPayload, { onConflict: "student_id" });
+  if (error) {
+    setButtonLoading(button, false);
+    return toast("Could not save enrollment", friendlyError(error), "error");
+  }
+  toast("Enrollment saved", "Pricing, source, and training plan are updated.", "success");
+  await refreshProfile();
+  if (state.route === "students") renderStudents();
 }
 
 async function saveProfilePlan() {
@@ -1647,10 +2280,88 @@ async function saveProfilePlan() {
   if (state.route === "dashboard") renderDashboard();
 }
 
+async function savePaymentPlan() {
+  const form = $("#profile-payment-plan-form");
+  if (!form.reportValidity()) return;
+  const values = normalizedFormValues(form);
+  const numberOfPayments = Math.max(1, Math.min(5, Number(values.number_of_payments || 1)));
+  const button = $("#save-profile-payment-plan");
+  const rowForms = $$(".payment-installment-row");
+  const rowValues = rowForms.map((row, index) => {
+    const raw = normalizedFormValues(row);
+    return {
+      id: row.dataset.installmentId || undefined,
+      installment_number: Number(raw.installment_number || index + 1),
+      label: raw.label || (index === 0 ? "Deposit" : `Installment ${index}`),
+      due_date: raw.due_date,
+      amount_due: Number(raw.amount_due || 0),
+      amount_paid: Number(raw.amount_paid || 0),
+      payment_status: raw.payment_status || "Pending",
+      unionbank_reference: raw.unionbank_reference,
+      payment_method: "UnionBank"
+    };
+  });
+  for (let index = rowValues.length; index < numberOfPayments; index++) {
+    rowValues.push({
+      installment_number: index + 1,
+      label: index === 0 ? "Deposit" : `Installment ${index}`,
+      amount_due: 0,
+      amount_paid: 0,
+      payment_status: "Pending",
+      payment_method: "UnionBank"
+    });
+  }
+  const installmentRows = rowValues.slice(0, numberOfPayments);
+  const totalPaid = installmentRows.reduce((sum, row) => sum + Number(row.amount_paid || 0), 0);
+  const totalDueFromRows = installmentRows.reduce((sum, row) => sum + Number(row.amount_due || 0), 0);
+  const totalContract = Number(values.total_contract_amount || totalDueFromRows || 0);
+  const balance = Math.max(totalContract - totalPaid, 0);
+  setButtonLoading(button, true, "Saving...");
+  const { data: plan, error } = await state.supabase
+    .from("payment_plans")
+    .upsert({
+      student_id: state.profile.id,
+      plan_type: values.plan_type || "Full Payment",
+      number_of_payments: numberOfPayments,
+      deposit_amount: Number(values.deposit_amount || 0),
+      total_contract_amount: totalContract,
+      total_paid: totalPaid,
+      balance,
+      notes: values.notes
+    }, { onConflict: "student_id" })
+    .select()
+    .single();
+  if (error) {
+    setButtonLoading(button, false);
+    return toast("Could not save payment plan", friendlyError(error), "error");
+  }
+  const upserts = installmentRows.map(row => ({
+    ...row,
+    payment_plan_id: plan.id,
+    student_id: state.profile.id
+  }));
+  const { error: installmentError } = await state.supabase
+    .from("payment_installments")
+    .upsert(upserts, { onConflict: "payment_plan_id,installment_number" });
+  if (installmentError) {
+    setButtonLoading(button, false);
+    return toast("Could not save installments", friendlyError(installmentError), "error");
+  }
+  await state.supabase
+    .from("finance_records")
+    .upsert({ student_id: state.profile.id, amount_paid: totalPaid, balance }, { onConflict: "student_id" });
+  toast("Payment plan saved", `${numberOfPayments} payment row${numberOfPayments === 1 ? "" : "s"} saved.`, "success");
+  await refreshProfile();
+}
+
 async function saveProfileRecord(table, formSelector, recordId, successTitle) {
   const form = $(formSelector);
   if (!form.reportValidity()) return;
   const values = normalizedFormValues(form);
+  Object.keys(values).forEach(key => {
+    if (values[key] === "true") values[key] = true;
+    if (values[key] === "false") values[key] = false;
+  });
   const button = form.parentElement.querySelector(".btn--primary");
   setButtonLoading(button, true, "Saving…");
   const payload = { ...values, student_id: state.profile.id };
@@ -1686,12 +2397,13 @@ async function saveRequirements() {
 }
 
 function certificateReadiness(values) {
+  const financeApproved = values.finance_clearance === "Cleared" || state.profile?.enrollment?.finance_exception_approved === true;
   if (values.attendance_status === "Met" &&
     values.activity_score_status === "Passed" &&
     values.readiness_status === "Ready" &&
     values.coach_approval === "Approved" &&
     values.admin_clearance === "Cleared" &&
-    values.finance_clearance === "Cleared") return "Certificate Ready";
+    financeApproved) return "Certificate Ready";
   if (values.attendance_status === "Not Met" ||
     values.activity_score_status === "Failed" ||
     values.readiness_status === "Not Ready" ||
@@ -1776,7 +2488,7 @@ function openCsvImport() {
       <label class="dropzone" id="csv-dropzone" for="csv-file">
         <span data-icon="upload-cloud"></span>
         <h3>Drop a CSV here or click to browse</h3>
-        <p>Required: first_name, last_name, email, course_group, batch_month, batch_year, batch_number. Optional: training_plan.</p>
+        <p>Required: first_name, last_name, email, course_group, batch_month, batch_year, batch_number. Optional: source, pricing, payment plan, finance/access status, messenger group.</p>
       </label>
       <div class="page-actions" style="justify-content:flex-start;margin-top:10px">
         <button class="action-link" id="download-template" type="button"><span data-icon="download"></span> Download CSV template</button>
@@ -1858,7 +2570,18 @@ function validateCsvRows(rows) {
     const number = Number(row.batch_number);
     if (![1, 2].includes(number)) return skipped.push({ row: index + 2, reason: "batch_number must be 1 or 2" });
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email)) return skipped.push({ row: index + 2, reason: `Invalid email "${row.email}"` });
-    if (row.finance_status && !APP.financeStatuses.includes(row.finance_status)) return skipped.push({ row: index + 2, reason: `Invalid finance_status "${row.finance_status}"` });
+    row.finance_status = normalizeFinanceStatus(row.finance_status);
+    if (raw.finance_status && !row.finance_status) return skipped.push({ row: index + 2, reason: `Invalid finance_status "${raw.finance_status}"` });
+    row.training_access_status = normalizeAccessStatus(row.training_access_status);
+    if (raw.training_access_status && !row.training_access_status) return skipped.push({ row: index + 2, reason: `Invalid training_access_status "${raw.training_access_status}"` });
+    row.source = normalizeStudentSource(row.source || "Other");
+    if (row.source && !sourceOptions().some(([value]) => value.toLowerCase() === row.source.toLowerCase())) return skipped.push({ row: index + 2, reason: `Invalid source "${row.source}"` });
+    if (row.payment_plan_type && !APP.paymentPlanTypes.includes(row.payment_plan_type)) return skipped.push({ row: index + 2, reason: `Invalid payment_plan_type "${row.payment_plan_type}"` });
+    if (row.number_of_payments && (!Number.isInteger(Number(row.number_of_payments)) || Number(row.number_of_payments) < 1 || Number(row.number_of_payments) > 5)) return skipped.push({ row: index + 2, reason: "number_of_payments must be 1 to 5" });
+    ["regular_price", "discount_amount", "final_price", "deposit_amount"].forEach(key => {
+      if (row[key] && Number(row[key]) < 0) skipped.push({ row: index + 2, reason: `${key} cannot be negative` });
+    });
+    if (skipped.at(-1)?.row === index + 2) return;
     if (row.student_status && !APP.studentStatuses.includes(row.student_status)) return skipped.push({ row: index + 2, reason: `Invalid student_status "${row.student_status}"` });
     const trainingPlan = normalizeTrainingPlan(row.training_plan || "2 Weeks");
     if (!trainingPlan) return skipped.push({ row: index + 2, reason: `Invalid training_plan "${row.training_plan}"` });
@@ -1924,14 +2647,53 @@ async function importCsvRows(validation) {
     setButtonLoading(button, true, "Applying imported statuses…");
     const byEmail = new Map(validation.valid.map(item => [item.data.email.toLowerCase(), item.data]));
     const financeRows = insertedStudents
-      .map(student => ({ student_id: student.id, payment_status: byEmail.get(student.email)?.finance_status }))
-      .filter(row => APP.financeStatuses.includes(row.payment_status));
+      .map(student => {
+        const source = byEmail.get(student.email) || {};
+        return {
+          student_id: student.id,
+          payment_status: source.finance_status || undefined,
+          training_access_status: source.training_access_status || undefined
+        };
+      })
+      .filter(row => APP.financeStatuses.includes(row.payment_status) || APP.trainingAccessStatuses.includes(row.training_access_status));
     const adminRows = insertedStudents
       .map(student => ({ student_id: student.id, student_status: byEmail.get(student.email)?.student_status }))
       .filter(row => APP.studentStatuses.includes(row.student_status));
+    const enrollmentRows = insertedStudents.map(student => {
+      const source = byEmail.get(student.email) || {};
+      return {
+        student_id: student.id,
+        source_name: source.source || "Other",
+        regular_price: Number(source.regular_price || 0),
+        discount_type: source.discount_type || "None",
+        discount_amount: Number(source.discount_amount || 0),
+        final_price: Number(source.final_price || 0),
+        enrollment_status: source.finance_status === "Deposit Paid" ? "Officially Enrolled" : "Pending Deposit",
+        messenger_group_added: parseBooleanish(source.messenger_group_added)
+      };
+    });
+    const paymentPlanRows = insertedStudents.map(student => {
+      const source = byEmail.get(student.email) || {};
+      return {
+        student_id: student.id,
+        plan_type: source.payment_plan_type || "Full Payment",
+        number_of_payments: Number(source.number_of_payments || 1),
+        deposit_amount: Number(source.deposit_amount || 0),
+        total_contract_amount: Number(source.final_price || source.regular_price || 0),
+        balance: Number(source.final_price || source.regular_price || 0)
+      };
+    });
     if (financeRows.length) {
       const { error } = await state.supabase.from("finance_records").upsert(financeRows, { onConflict: "student_id" });
       if (error) errors.push(`Finance statuses: ${friendlyError(error)}`);
+    }
+    if (enrollmentRows.length) {
+      const { error } = await state.supabase.from("enrollment_records").upsert(enrollmentRows, { onConflict: "student_id" });
+      if (error) errors.push(`Enrollment records: ${friendlyError(error)}`);
+    }
+    if (paymentPlanRows.length) {
+      const { error } = await state.supabase.from("payment_plans").upsert(paymentPlanRows, { onConflict: "student_id" });
+      if (error) errors.push(`Payment plans: ${friendlyError(error)}`);
     }
     if (adminRows.length) {
       const { error } = await state.supabase.from("admin_records").upsert(adminRows, { onConflict: "student_id" });
@@ -1998,8 +2760,8 @@ function parseCsv(text) {
 }
 
 function downloadCsvTemplate() {
-  const header = "first_name,last_name,email,phone,course_group,batch_month,batch_year,batch_number,training_plan,coach,finance_status,student_status";
-  const example = "Juan,Dela Cruz,juan@example.com,09171234567,USBK,July,2026,1,1 Month,Coach Name,Pending Payment,Active";
+  const header = "first_name,last_name,email,phone,course_group,batch_month,batch_year,batch_number,training_plan,source,regular_price,discount_type,discount_amount,final_price,payment_plan_type,number_of_payments,deposit_amount,finance_status,training_access_status,messenger_group_added,coach,student_status";
+  const example = "Juan,Dela Cruz,juan@example.com,09171234567,USBK,July,2026,1,1 Month,Referral,15000,Referral,1000,14000,Standard Staggered,3,5000,Deposit Paid,Active,Yes,Coach Name,Active";
   downloadFile("sync2va-student-import-template.csv", `${header}\r\n${example}\r\n`, "text/csv;charset=utf-8");
 }
 
@@ -2008,10 +2770,12 @@ function downloadCsvTemplate() {
 async function exportStudents(filters = {}, filename = "sync2va-students.csv") {
   toast("Preparing export", "Fetching matching records from Supabase…", "warning", 1800);
   let query = state.supabase.from("students").select(`
-    first_name,last_name,email,phone,coach,training_plan,created_at,updated_at,course_group_id,batch_id,
+    first_name,last_name,email,phone,coach,training_plan,training_access_status,created_at,updated_at,course_group_id,batch_id,
     course_group:course_groups(code,name),
     batch:batches(name,month,year,batch_number),
-    finance:finance_records!inner(payment_status,amount_paid,balance,payment_method,payment_date),
+    enrollment:enrollment_records!inner(source_name,regular_price,discount_type,discount_amount,final_price,enrollment_status,messenger_group_added),
+    finance:finance_records!inner(payment_status,training_access_status,amount_paid,balance,payment_method,unionbank_reference,payment_date,due_date,refund_status),
+    payment_plan:payment_plans(plan_type,number_of_payments,deposit_amount,total_contract_amount,total_paid,balance),
     admin:admin_records!inner(student_status,concern_type,concern_status,priority),
     requirements:requirements!inner(attendance_status,activity_score_status,readiness_status,coach_approval,admin_clearance,finance_clearance,overall_status),
     certificates:certificates!inner(certificate_type,status,issued_date,certificate_number,issued_by)
@@ -2020,6 +2784,8 @@ async function exportStudents(filters = {}, filename = "sync2va-students.csv") {
   if (filters.batch) query = query.eq("batch_id", filters.batch);
   if ((filters.month || filters.year) && !filters.batch) query = query.in("batch_id", batchIdsForPeriod(filters.month, filters.year, filters.courseGroup));
   if (filters.plan) query = query.eq("training_plan", filters.plan);
+  if (filters.source) query = query.eq("enrollment.source_name", filters.source);
+  if (filters.access) query = query.eq("training_access_status", filters.access);
   if (filters.finance) query = query.eq("finance.payment_status", filters.finance);
   if (filters.admin) query = query.eq("admin.student_status", filters.admin);
   if (filters.requirement) query = query.eq("requirements.overall_status", filters.requirement);
@@ -2044,13 +2810,27 @@ async function exportStudents(filters = {}, filename = "sync2va-students.csv") {
       batch_month: APP.months[(s.batch?.month || 1) - 1],
       batch_year: s.batch?.year,
       batch_number: s.batch?.batch_number,
+      source: s.enrollment?.source_name,
       training_plan: studentPlan(s),
+      regular_price: s.enrollment?.regular_price,
+      discount_type: s.enrollment?.discount_type,
+      discount_amount: s.enrollment?.discount_amount,
+      final_price: s.enrollment?.final_price,
+      enrollment_status: s.enrollment?.enrollment_status,
+      messenger_group_added: s.enrollment?.messenger_group_added ? "Yes" : "No",
       coach: s.coach,
       finance_status: s.finance?.payment_status,
+      training_access_status: s.finance?.training_access_status || s.training_access_status,
       amount_paid: s.finance?.amount_paid,
       balance: s.finance?.balance,
       payment_method: s.finance?.payment_method,
+      unionbank_reference: s.finance?.unionbank_reference,
       payment_date: s.finance?.payment_date,
+      due_date: s.finance?.due_date,
+      refund_status: s.finance?.refund_status,
+      payment_plan_type: s.payment_plan?.plan_type,
+      number_of_payments: s.payment_plan?.number_of_payments,
+      deposit_amount: s.payment_plan?.deposit_amount,
       student_status: s.admin?.student_status,
       concern_type: s.admin?.concern_type,
       concern_status: s.admin?.concern_status,
@@ -2083,14 +2863,147 @@ function exportFinance(records) {
     course_group: r.student?.course_group?.code,
     batch_name: r.student?.batch?.name,
     payment_status: r.payment_status,
+    training_access_status: r.training_access_status || r.student?.training_access_status,
     amount_paid: r.amount_paid,
     balance: r.balance,
     payment_method: r.payment_method,
+    unionbank_reference: r.unionbank_reference,
     payment_date: r.payment_date,
+    due_date: r.due_date,
+    refund_status: r.refund_status,
     updated_at: r.updated_at
   }));
   downloadRowsAsCsv("sync2va-finance-report.csv", rows);
   toast("Finance export ready", `${rows.length} records included.`, "success");
+}
+
+async function exportFinanceReport() {
+  const { data, error } = await state.supabase
+    .from("finance_records")
+    .select("*,student:students(first_name,last_name,email,training_access_status,course_group:course_groups(code),batch:batches(name))")
+    .order("updated_at", { ascending: false })
+    .limit(10000);
+  if (error) return toast("Finance export failed", friendlyError(error), "error");
+  exportFinance(data || []);
+}
+
+async function exportPaymentInstallments() {
+  const { data, error } = await state.supabase
+    .from("payment_installments")
+    .select("*,student:students(first_name,last_name,email,course_group:course_groups(code),batch:batches(name))")
+    .order("due_date", { ascending: true })
+    .limit(10000);
+  if (error) return toast("Installment export failed", friendlyError(error), "error");
+  const rows = (data || []).map(r => ({
+    student_name: fullName(r.student),
+    email: r.student?.email,
+    course_group: r.student?.course_group?.code,
+    batch_name: r.student?.batch?.name,
+    installment_number: r.installment_number,
+    label: r.label,
+    due_date: r.due_date,
+    amount_due: r.amount_due,
+    amount_paid: r.amount_paid,
+    payment_status: r.payment_status,
+    payment_method: r.payment_method,
+    unionbank_reference: r.unionbank_reference,
+    payment_date: r.payment_date,
+    notes: r.notes
+  }));
+  downloadRowsAsCsv("sync2va-payment-installments.csv", rows);
+  toast("Installment export ready", `${rows.length} installment rows included.`, "success");
+}
+
+async function exportRefundReport() {
+  const { data, error } = await state.supabase
+    .from("finance_records")
+    .select("*,student:students(first_name,last_name,email,course_group:course_groups(code),batch:batches(name))")
+    .in("refund_status", ["Requested", "Approved", "Processing", "Refunded", "Rejected"])
+    .order("updated_at", { ascending: false })
+    .limit(10000);
+  if (error) return toast("Refund export failed", friendlyError(error), "error");
+  const rows = (data || []).map(r => ({
+    student_name: fullName(r.student),
+    email: r.student?.email,
+    course_group: r.student?.course_group?.code,
+    batch_name: r.student?.batch?.name,
+    payment_status: r.payment_status,
+    refund_status: r.refund_status,
+    refund_requested: r.refund_requested ? "Yes" : "No",
+    refund_reason: r.refund_reason,
+    refund_date: r.refund_date,
+    amount_paid: r.amount_paid,
+    balance: r.balance,
+    updated_at: r.updated_at
+  }));
+  downloadRowsAsCsv("sync2va-refunds.csv", rows);
+  toast("Refund export ready", `${rows.length} refund rows included.`, "success");
+}
+
+async function exportCoachProgress() {
+  const { data, error } = await state.supabase
+    .from("students")
+    .select(`
+      first_name,last_name,email,training_plan,training_access_status,
+      course_group:course_groups(code),batch:batches(name),
+      classroom:classroom_records(invite_status,joined_status,final_coach_recommendation,coach_comment),
+      student_activities(status,score,coach_comment,activity:activities(name,activity_track,sort_order))
+    `)
+    .order("last_name")
+    .limit(10000);
+  if (error) return toast("Coach progress export failed", friendlyError(error), "error");
+  const rows = [];
+  (data || []).forEach(student => {
+    const activities = relevantStudentActivities(student);
+    if (!activities.length) {
+      rows.push(coachProgressRow(student, {}));
+    } else {
+      activities.forEach(activity => rows.push(coachProgressRow(student, activity)));
+    }
+  });
+  downloadRowsAsCsv("sync2va-coach-progress.csv", rows);
+  toast("Coach progress export ready", `${rows.length} rows included.`, "success");
+}
+
+function coachProgressRow(student, activityRow) {
+  return {
+    student_name: fullName(student),
+    email: student.email,
+    course_group: student.course_group?.code,
+    batch_name: student.batch?.name,
+    training_plan: studentPlan(student),
+    training_access_status: student.training_access_status,
+    classroom_invite: student.classroom?.invite_status,
+    joined_classroom: student.classroom?.joined_status,
+    final_recommendation: student.classroom?.final_coach_recommendation,
+    activity: activityRow.activity?.name,
+    activity_track: activityRow.activity?.activity_track,
+    activity_status: activityRow.status,
+    score: activityRow.score,
+    coach_comment: activityRow.coach_comment
+  };
+}
+
+async function exportAttendanceReport() {
+  const { data, error } = await state.supabase
+    .from("attendance_records")
+    .select("*,student:students(first_name,last_name,email,course_group:course_groups(code),batch:batches(name)),session:attendance_sessions(title,session_date,batch:batches(name))")
+    .order("created_at", { ascending: false })
+    .limit(10000);
+  if (error) return toast("Attendance export failed", friendlyError(error), "error");
+  const rows = (data || []).map(r => ({
+    student_name: fullName(r.student),
+    email: r.student?.email,
+    course_group: r.student?.course_group?.code,
+    student_batch: r.student?.batch?.name,
+    session_title: r.session?.title,
+    session_date: r.session?.session_date,
+    session_batch: r.session?.batch?.name,
+    status: r.status,
+    notes: r.notes
+  }));
+  downloadRowsAsCsv("sync2va-attendance.csv", rows);
+  toast("Attendance export ready", `${rows.length} attendance rows included.`, "success");
 }
 
 function exportCertificateRecords(records) {
@@ -2258,6 +3171,11 @@ function filteredBatchOptions(courseGroupId) {
     .map(b => [b.id, b.name]);
 }
 
+function sourceOptions() {
+  const names = state.studentSources.length ? state.studentSources.map(source => source.name) : APP.sources;
+  return [...new Set(names)].map(name => [name, name]);
+}
+
 function batchIdsForPeriod(month, year, courseGroupId = "") {
   const ids = state.batches
     .filter(batch =>
@@ -2302,14 +3220,19 @@ function statusBadge(value) {
   const status = value || "—";
   const colors = {
     "Active": "green", "Completed": "blue", "Fully Paid": "green", "Issued": "green",
+    "Officially Enrolled": "green", "Paid": "green", "Present": "green",
     "Certificate Ready": "green", "Met": "green", "Passed": "green", "Ready": "green",
     "Approved": "green", "Cleared": "green", "Yes": "green", "Pass": "green", "Resolved": "green",
-    "Pending Payment": "yellow", "Pending": "yellow", "For Review": "yellow", "In Progress": "yellow",
-    "On Hold": "yellow", "Downpayment Paid": "blue", "Intensive Training": "blue", "2 Weeks": "blue",
+    "Pending Deposit": "yellow", "Pending Payment": "yellow", "Pending": "yellow", "For Review": "yellow", "In Progress": "yellow",
+    "Not Started": "yellow", "Submitted": "blue", "Late": "yellow", "Excused": "blue",
+    "On Hold": "yellow", "Payment Watch": "yellow", "Deposit Paid": "blue", "Partial Payment": "blue", "Downpayment Paid": "blue", "Intensive Training": "blue", "2 Weeks": "blue",
     "Inactive": "neutral", "Archived": "neutral", "Not Eligible": "neutral", "No": "neutral",
+    "None": "neutral", "Draft": "neutral", "Logged": "neutral",
     "Dropped": "red", "Refunded": "red", "Failed": "red", "Fail": "red", "Not Ready": "red",
     "Not Met": "red", "Not Approved": "red", "Hold": "red", "Open": "red", "High": "red",
-    "Retake": "orange", "Career Accelerator": "purple", "1 Month": "purple", "CAP": "purple"
+    "Payment Hold": "red", "Remove from Training": "red", "Overdue": "red", "Cancelled": "red", "Absent": "red",
+    "Refund Requested": "orange", "Requested": "orange", "Processing": "orange", "Returned": "orange",
+    "Retake": "orange", "Career Accelerator": "purple", "1 Month": "purple", "CAP": "purple", "Custom Staggered": "purple"
   };
   return `<span class="badge badge--${colors[status] || "neutral"}">${escapeHtml(status)}</span>`;
 }
@@ -2382,6 +3305,10 @@ function formatDate(value) {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(date);
 }
 
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function formatDateTime(value) {
   if (!value) return "—";
   const date = new Date(value);
@@ -2428,6 +3355,37 @@ function normalizeTrainingPlan(value) {
   return APP.planOptions.find(plan => plan.toLowerCase() === normalized) || "";
 }
 
+function normalizeFinanceStatus(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+  const legacy = {
+    "Pending Payment": "Pending Deposit",
+    "Downpayment Paid": "Deposit Paid"
+  };
+  return legacy[normalized] || APP.financeStatuses.find(status => status.toLowerCase() === normalized.toLowerCase()) || "";
+}
+
+function normalizeAccessStatus(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+  return APP.trainingAccessStatuses.find(status => status.toLowerCase() === normalized.toLowerCase()) || "";
+}
+
+function normalizeStudentSource(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "Other";
+  if (normalized.includes("facebook") || normalized.includes("social")) return "Facebook / Social Media";
+  if (normalized.includes("referral")) return "Referral";
+  if (normalized.includes("webinar")) return "Webinar";
+  if (normalized.includes("other")) return "Other";
+  return sourceOptions().find(([source]) => source.toLowerCase() === normalized)?.[0] || value;
+}
+
+function parseBooleanish(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return ["yes", "true", "1", "y"].includes(normalized);
+}
+
 function hasActiveFilters(filters) {
   return Object.values(filters || {}).some(Boolean);
 }
@@ -2441,7 +3399,7 @@ function friendlyError(error) {
   if (/Failed to fetch/i.test(message)) return "Could not reach Supabase. Check the project URL, internet connection, and browser console.";
   if (/Invalid API key|JWT/i.test(message)) return "The Supabase anon key is invalid or expired.";
   if (/relation .* does not exist/i.test(message)) return "The database schema is missing. Run supabase-schema.sql in the Supabase SQL Editor.";
-  if (/column .*training_plan.*does not exist|column .*activity_track.*does not exist/i.test(message)) return "The database needs the latest Plan update. Run the updated supabase-schema.sql in the Supabase SQL Editor.";
+  if (/column .*(training_plan|activity_track|training_access_status|refund_status|joined_status).*does not exist/i.test(message)) return "The database needs the latest Sync2VA upgrade. Run the updated supabase-schema.sql in the Supabase SQL Editor.";
   if (/duplicate key.*students_email/i.test(message) || /students_email_key/i.test(message)) return "A student with this email already exists.";
   if (/duplicate key/i.test(message)) return "This record already exists.";
   if (/row-level security/i.test(message)) return "Supabase blocked this request. Sign in and verify the RLS policies from the SQL schema.";
@@ -2486,6 +3444,7 @@ const iconPaths = {
   "bar-chart": '<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/>',
   "book": '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/>',
   "calendar": '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/>',
+  "calendar-check": '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/><path d="m8 16 2.5 2.5L16 13"/>',
   "check": '<path d="m5 12 4 4L19 6"/>',
   "check-circle": '<circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16.5 8"/>',
   "check-square": '<polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
@@ -2502,6 +3461,7 @@ const iconPaths = {
   "info": '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
   "layers": '<path d="m12 2 9 5-9 5-9-5Z"/><path d="m3 12 9 5 9-5"/><path d="m3 17 9 5 9-5"/>',
   "log-out": '<path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>',
+  "mail": '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
   "menu": '<path d="M4 6h16M4 12h16M4 18h16"/>',
   "plus": '<path d="M12 5v14M5 12h14"/>',
   "refresh-cw": '<path d="M20 7h-5V2"/><path d="M4 17h5v5"/><path d="M5.6 8a8 8 0 0 1 13.1-2L20 7M4 17l1.3 1a8 8 0 0 0 13.1-2"/>',
