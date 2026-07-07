@@ -1,0 +1,2210 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Coach Activity Portal</title>
+  <style>
+    :root {
+      --bg: #f6f7f5;
+      --panel: #ffffff;
+      --panel-2: #eef5f1;
+      --ink: #18211f;
+      --muted: #65736f;
+      --line: #dce4df;
+      --teal: #0d8278;
+      --teal-2: #d9eeea;
+      --coral: #cf5c42;
+      --amber: #d59a2b;
+      --green: #3f8f55;
+      --blue: #366a9f;
+      --red: #b94b4b;
+      --shadow: 0 18px 45px rgba(24, 33, 31, 0.08);
+      --radius: 8px;
+      --sidebar: 256px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.88) 0%, rgba(246,247,245,0.96) 34%),
+        radial-gradient(circle at 10% 0%, rgba(13,130,120,0.10), transparent 30%),
+        radial-gradient(circle at 92% 8%, rgba(207,92,66,0.08), transparent 28%),
+        var(--bg);
+      color: var(--ink);
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      border: 0;
+      cursor: pointer;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: var(--sidebar) minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 22px 16px;
+      background: #18211f;
+      color: #f7fbf9;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 48px;
+    }
+
+    .brand-mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(135deg, #25a394, #f0b14b);
+      box-shadow: 0 12px 22px rgba(0,0,0,0.22);
+    }
+
+    .brand-mark svg {
+      width: 26px;
+      height: 26px;
+      stroke: #fff;
+      stroke-width: 2;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .brand strong {
+      display: block;
+      font-size: 1rem;
+      letter-spacing: 0;
+    }
+
+    .brand span {
+      display: block;
+      color: rgba(247,251,249,0.68);
+      font-size: 0.78rem;
+      margin-top: 2px;
+    }
+
+    .nav {
+      display: grid;
+      gap: 6px;
+    }
+
+    .nav button {
+      width: 100%;
+      min-height: 42px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      color: rgba(247,251,249,0.74);
+      background: transparent;
+      display: grid;
+      grid-template-columns: 22px 1fr;
+      align-items: center;
+      gap: 10px;
+      text-align: left;
+    }
+
+    .nav button:hover,
+    .nav button.active {
+      background: rgba(255,255,255,0.11);
+      color: #fff;
+    }
+
+    .nav svg,
+    .icon {
+      width: 18px;
+      height: 18px;
+      stroke: currentColor;
+      stroke-width: 2;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      flex: 0 0 auto;
+    }
+
+    .sidebar-footer {
+      margin-top: auto;
+      border-top: 1px solid rgba(255,255,255,0.12);
+      padding-top: 16px;
+      display: grid;
+      gap: 8px;
+      color: rgba(247,251,249,0.7);
+      font-size: 0.78rem;
+      line-height: 1.35;
+    }
+
+    .session-code {
+      display: block;
+      overflow-wrap: anywhere;
+      color: #fff;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.72rem;
+      line-height: 1.35;
+      margin-top: 2px;
+    }
+
+    .content {
+      min-width: 0;
+      padding: 24px clamp(16px, 3vw, 36px) 42px;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 18px;
+      margin-bottom: 24px;
+    }
+
+    .title-stack h1 {
+      margin: 0;
+      font-size: clamp(1.45rem, 2.5vw, 2.2rem);
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    .title-stack p {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .search {
+      position: relative;
+      width: min(340px, 100%);
+    }
+
+    .search svg {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--muted);
+    }
+
+    .search input {
+      width: 100%;
+      min-height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0 12px 0 40px;
+      color: var(--ink);
+      background: rgba(255,255,255,0.82);
+      outline: none;
+    }
+
+    .search input:focus {
+      border-color: rgba(13,130,120,0.62);
+      box-shadow: 0 0 0 3px rgba(13,130,120,0.12);
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 32px;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.8);
+      color: var(--muted);
+      font-size: 0.8rem;
+      white-space: nowrap;
+    }
+
+    .pill strong {
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--red);
+    }
+
+    .dot.ok {
+      background: var(--green);
+    }
+
+    .dot.warn {
+      background: var(--amber);
+    }
+
+    .view {
+      display: none;
+      animation: rise 220ms ease;
+    }
+
+    .view.active {
+      display: block;
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(150px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .metric-card,
+    .card,
+    .connection-card,
+    .activity-card,
+    .learner-row,
+    .stat-tile {
+      background: rgba(255,255,255,0.94);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .metric-card {
+      padding: 16px;
+      min-height: 128px;
+      display: grid;
+      align-content: space-between;
+      gap: 12px;
+    }
+
+    .metric-card .metric-label {
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+
+    .metric-card strong {
+      display: block;
+      font-size: 1.9rem;
+      line-height: 1;
+      letter-spacing: 0;
+      margin-top: 8px;
+    }
+
+    .trend {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--green);
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+
+    .trend.warn {
+      color: var(--amber);
+    }
+
+    .trend.bad {
+      color: var(--red);
+    }
+
+    .chart-bars {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 5px;
+      align-items: end;
+      height: 36px;
+      margin-top: 8px;
+    }
+
+    .chart-bars span {
+      display: block;
+      border-radius: 5px 5px 2px 2px;
+      background: linear-gradient(180deg, var(--teal), #6cc6b7);
+      min-height: 8px;
+    }
+
+    .card {
+      padding: 18px;
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+
+    .card-header h2,
+    .section-title h2 {
+      margin: 0;
+      font-size: 1.05rem;
+      letter-spacing: 0;
+    }
+
+    .card-header p,
+    .section-title p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+
+    .visual-card {
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .flow-visual {
+      display: block;
+      width: 100%;
+      aspect-ratio: 1200 / 420;
+      object-fit: cover;
+      background: #e8f1ee;
+    }
+
+    .sync-strip {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      padding: 14px;
+      background: #fff;
+      border-top: 1px solid var(--line);
+    }
+
+    .sync-strip div {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .sync-strip strong {
+      font-size: 0.85rem;
+    }
+
+    .sync-strip span {
+      color: var(--muted);
+      font-size: 0.78rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .activity-list,
+    .sync-log,
+    .compact-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .activity-row,
+    .log-row,
+    .compact-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      min-height: 62px;
+    }
+
+    .activity-row h3,
+    .compact-row h3 {
+      margin: 0;
+      font-size: 0.93rem;
+      letter-spacing: 0;
+    }
+
+    .activity-row p,
+    .compact-row p,
+    .log-row p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 0.8rem;
+      line-height: 1.35;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 0.76rem;
+      font-weight: 800;
+      color: #1e3933;
+      background: var(--teal-2);
+      white-space: nowrap;
+    }
+
+    .status.amber {
+      background: #faedcf;
+      color: #705011;
+    }
+
+    .status.coral {
+      background: #f8ddd6;
+      color: #7a2f20;
+    }
+
+    .status.green {
+      background: #deefd9;
+      color: #2d6234;
+    }
+
+    .section-tools {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .section-title {
+      min-width: 220px;
+    }
+
+    .tool-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      justify-content: flex-end;
+    }
+
+    .btn,
+    .icon-btn,
+    .segmented button {
+      min-height: 38px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 8px 12px;
+      font-weight: 800;
+      font-size: 0.86rem;
+      box-shadow: 0 8px 16px rgba(24,33,31,0.04);
+    }
+
+    .btn.primary {
+      background: var(--teal);
+      border-color: var(--teal);
+      color: #fff;
+    }
+
+    .btn.coral {
+      background: var(--coral);
+      border-color: var(--coral);
+      color: #fff;
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .icon-btn {
+      width: 38px;
+      padding: 0;
+    }
+
+    .select-wrap select,
+    .field input,
+    .field select,
+    .field textarea {
+      width: 100%;
+      min-height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      padding: 8px 10px;
+      outline: none;
+    }
+
+    .field textarea {
+      min-height: 92px;
+      resize: vertical;
+    }
+
+    .field input:focus,
+    .field select:focus,
+    .field textarea:focus,
+    .select-wrap select:focus {
+      border-color: rgba(13,130,120,0.65);
+      box-shadow: 0 0 0 3px rgba(13,130,120,0.12);
+    }
+
+    .select-wrap {
+      min-width: 170px;
+    }
+
+    .activity-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(240px, 1fr));
+      gap: 14px;
+    }
+
+    .activity-card {
+      overflow: hidden;
+      display: grid;
+      min-height: 256px;
+    }
+
+    .activity-band {
+      height: 8px;
+      background: var(--teal);
+    }
+
+    .activity-body {
+      padding: 16px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .activity-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      align-items: center;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #f0f3f1;
+      color: #40504b;
+      font-size: 0.76rem;
+      font-weight: 700;
+    }
+
+    .activity-card h3 {
+      margin: 0;
+      font-size: 1.05rem;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .activity-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.85rem;
+      line-height: 1.45;
+    }
+
+    .progress {
+      display: grid;
+      gap: 6px;
+    }
+
+    .progress-label {
+      display: flex;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+
+    .progress-track {
+      height: 8px;
+      border-radius: 999px;
+      background: #edf1ef;
+      overflow: hidden;
+    }
+
+    .progress-track span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--teal), var(--amber));
+    }
+
+    .activity-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: flex-end;
+      margin-top: auto;
+    }
+
+    .table-shell {
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: var(--shadow);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 780px;
+      font-size: 0.87rem;
+    }
+
+    th,
+    td {
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: #f8faf8;
+    }
+
+    tbody tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .person {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .avatar {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: #dcebe7;
+      color: #0d6c64;
+      font-weight: 900;
+      flex: 0 0 auto;
+    }
+
+    .calendar-grid {
+      display: grid;
+      grid-template-columns: 120px repeat(5, minmax(150px, 1fr));
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: auto;
+      background: #fff;
+      box-shadow: var(--shadow);
+    }
+
+    .calendar-cell {
+      min-height: 102px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      padding: 12px;
+      display: grid;
+      align-content: start;
+      gap: 8px;
+    }
+
+    .calendar-cell:nth-child(6n) {
+      border-right: 0;
+    }
+
+    .calendar-head {
+      min-height: 54px;
+      background: #f8faf8;
+      color: var(--muted);
+      font-weight: 900;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .calendar-time {
+      background: #fbfcfb;
+      color: var(--muted);
+      font-weight: 800;
+      font-size: 0.8rem;
+    }
+
+    .event {
+      display: grid;
+      gap: 4px;
+      padding: 9px;
+      border-radius: 8px;
+      background: var(--teal-2);
+      color: #123d38;
+      font-size: 0.78rem;
+      min-height: 54px;
+    }
+
+    .event strong {
+      font-size: 0.8rem;
+      line-height: 1.2;
+    }
+
+    .sync-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(280px, 1fr));
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+
+    .connection-card {
+      padding: 18px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .connection-top {
+      display: grid;
+      grid-template-columns: 44px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .connection-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      background: var(--teal-2);
+      color: var(--teal);
+    }
+
+    .connection-top h3 {
+      margin: 0;
+      font-size: 1rem;
+    }
+
+    .connection-top p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+
+    .field.full {
+      grid-column: 1 / -1;
+    }
+
+    .field label {
+      color: #394844;
+      font-size: 0.78rem;
+      font-weight: 800;
+    }
+
+    .connection-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+      align-items: center;
+    }
+
+    .mapping-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.95fr);
+      gap: 14px;
+      align-items: start;
+    }
+
+    .log-row {
+      grid-template-columns: auto minmax(0, 1fr) auto;
+    }
+
+    .log-icon {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      background: #f0f3f1;
+      color: var(--teal);
+    }
+
+    .insight-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(220px, 1fr));
+      gap: 14px;
+    }
+
+    .stat-tile {
+      padding: 18px;
+      display: grid;
+      gap: 14px;
+      min-height: 212px;
+    }
+
+    .donut {
+      width: 112px;
+      height: 112px;
+      border-radius: 50%;
+      margin: auto;
+      background: conic-gradient(var(--teal) 0 72%, var(--amber) 72% 88%, #e4e9e6 88%);
+      position: relative;
+    }
+
+    .donut::after {
+      content: "";
+      position: absolute;
+      inset: 18px;
+      border-radius: 50%;
+      background: #fff;
+    }
+
+    .donut strong {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      z-index: 1;
+      font-size: 1.35rem;
+    }
+
+    .settings-grid {
+      display: grid;
+      grid-template-columns: minmax(280px, 0.8fr) minmax(300px, 1.2fr);
+      gap: 14px;
+      align-items: start;
+    }
+
+    .toggle-row {
+      display: grid;
+      gap: 10px;
+    }
+
+    .toggle {
+      min-height: 52px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .toggle:last-child {
+      border-bottom: 0;
+    }
+
+    .toggle strong {
+      font-size: 0.9rem;
+    }
+
+    .toggle span {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .switch {
+      width: 48px;
+      height: 28px;
+      border-radius: 999px;
+      background: #ccd6d1;
+      padding: 3px;
+      transition: background 180ms ease;
+    }
+
+    .switch::before {
+      content: "";
+      display: block;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      transition: transform 180ms ease;
+    }
+
+    .switch.on {
+      background: var(--teal);
+    }
+
+    .switch.on::before {
+      transform: translateX(20px);
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(24,33,31,0.38);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      z-index: 20;
+    }
+
+    .modal-backdrop.active {
+      display: flex;
+    }
+
+    .modal {
+      width: min(760px, 100%);
+      max-height: min(760px, 92vh);
+      overflow: auto;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 30px 80px rgba(0,0,0,0.24);
+    }
+
+    .modal-header {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      padding: 18px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .modal-header h2 {
+      margin: 0;
+      font-size: 1.12rem;
+    }
+
+    .modal-body {
+      padding: 18px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 0 18px 18px;
+    }
+
+    .empty {
+      min-height: 140px;
+      display: grid;
+      place-items: center;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      background: rgba(255,255,255,0.7);
+      text-align: center;
+      padding: 20px;
+    }
+
+    .toast {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 30;
+      display: grid;
+      gap: 8px;
+    }
+
+    .toast div {
+      background: #18211f;
+      color: #fff;
+      border-radius: 8px;
+      padding: 12px 14px;
+      box-shadow: 0 16px 36px rgba(0,0,0,0.2);
+      min-width: 220px;
+      font-size: 0.86rem;
+      animation: rise 180ms ease;
+    }
+
+    .mobile-bar {
+      display: none;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: rgba(255,255,255,0.92);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--line);
+      padding: 10px 14px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .sprite {
+      position: absolute;
+      width: 0;
+      height: 0;
+      overflow: hidden;
+    }
+
+    @media (max-width: 1180px) {
+      .metric-grid,
+      .activity-grid,
+      .insight-grid {
+        grid-template-columns: repeat(2, minmax(220px, 1fr));
+      }
+
+      .dashboard-grid,
+      .mapping-grid,
+      .settings-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 860px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      .mobile-bar {
+        display: flex;
+      }
+
+      .sidebar {
+        position: fixed;
+        inset: 0 auto 0 0;
+        width: min(300px, 86vw);
+        transform: translateX(-102%);
+        transition: transform 180ms ease;
+        z-index: 18;
+      }
+
+      body.menu-open .sidebar {
+        transform: translateX(0);
+      }
+
+      .content {
+        padding-top: 18px;
+      }
+
+      .topbar {
+        grid-template-columns: 1fr;
+      }
+
+      .top-actions {
+        justify-content: flex-start;
+      }
+
+      .metric-grid,
+      .activity-grid,
+      .sync-grid,
+      .insight-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .calendar-grid {
+        grid-template-columns: 100px repeat(5, minmax(132px, 1fr));
+      }
+    }
+
+    @media (max-width: 540px) {
+      .content {
+        padding-left: 12px;
+        padding-right: 12px;
+      }
+
+      .top-actions,
+      .tool-row,
+      .connection-actions,
+      .modal-actions {
+        align-items: stretch;
+      }
+
+      .btn,
+      .select-wrap,
+      .search,
+      .top-actions > *,
+      .tool-row > * {
+        width: 100%;
+      }
+
+      .metric-card {
+        min-height: 110px;
+      }
+
+      .sync-strip {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <svg class="sprite" aria-hidden="true">
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10.5V20h14v-9.5"/><path d="M9 20v-6h6v6"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M4 19V5"/><path d="M8 19V9"/><path d="M12 19V7"/><path d="M16 19v-4"/><path d="M20 19V11"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4"/><path d="M16 3v4"/><path d="M4 10h16"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 20v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M22 20v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-sync" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 0-15.5-6.2L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15.5 6.2L21 16"/><path d="M21 21v-5h-5"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 19h16"/><path d="M7 16V9"/><path d="M12 16V5"/><path d="M17 16v-4"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .32 1.76l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.6 1.6 0 0 0 15 19.4a1.6 1.6 0 0 0-1 .6l-.1.14a2 2 0 0 1-3.8 0L10 20a1.6 1.6 0 0 0-1-.6 1.6 1.6 0 0 0-1.76.32l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.6 1.6 0 0 0 4.6 15a1.6 1.6 0 0 0-.6-1l-.14-.1a2 2 0 0 1 0-3.8L4 10a1.6 1.6 0 0 0 .6-1 1.6 1.6 0 0 0-.32-1.76l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.6 1.6 0 0 0 9 4.6a1.6 1.6 0 0 0 1-.6l.1-.14a2 2 0 0 1 3.8 0L14 4a1.6 1.6 0 0 0 1 .6 1.6 1.6 0 0 0 1.76-.32l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.6 1.6 0 0 0 19.4 9c.13.38.34.72.6 1l.14.1a2 2 0 0 1 0 3.8L20 14a1.6 1.6 0 0 0-.6 1z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M7 7v4"/><path d="M17 7v4"/><path d="M6 11h12v2a6 6 0 0 1-12 0v-2z"/><path d="M12 19v3"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5z"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m20 6-11 11-5-5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 5h16"/><path d="M7 12h10"/><path d="M10 19h4"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+  </svg>
+
+  <div class="mobile-bar">
+    <button class="icon-btn" id="menuToggle" aria-label="Open navigation"><svg class="icon"><use href="#i-menu"></use></svg></button>
+    <strong>Coach Portal</strong>
+    <button class="icon-btn" data-action="open-modal" aria-label="Add activity"><svg class="icon"><use href="#i-plus"></use></svg></button>
+  </div>
+
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark"><svg><path d="M6 17V7l6-3 6 3v10l-6 3-6-3z"/><path d="M9 11h6"/><path d="M12 8v6"/></svg></div>
+        <div>
+          <strong>Coach Portal</strong>
+          <span>Activity command center</span>
+        </div>
+      </div>
+
+      <nav class="nav" aria-label="Main navigation">
+        <button class="active" data-view="dashboard"><svg><use href="#i-home"></use></svg><span>Dashboard</span></button>
+        <button data-view="activities"><svg><use href="#i-activity"></use></svg><span>Activities</span></button>
+        <button data-view="schedule"><svg><use href="#i-calendar"></use></svg><span>Schedule</span></button>
+        <button data-view="learners"><svg><use href="#i-users"></use></svg><span>Learners</span></button>
+        <button data-view="sync"><svg><use href="#i-sync"></use></svg><span>Sync Center</span></button>
+        <button data-view="insights"><svg><use href="#i-chart"></use></svg><span>Insights</span></button>
+        <button data-view="settings"><svg><use href="#i-settings"></use></svg><span>Settings</span></button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <span>Session</span>
+        <span class="session-code">019f36dd-0e70-7de3-89bc-0bfcb643a766</span>
+        <span id="saveState">Saved locally</span>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div class="title-stack">
+          <h1 id="viewTitle">Dashboard</h1>
+          <p id="viewSubtitle">Coach activities, roster momentum, and integration health in one workspace.</p>
+        </div>
+        <div class="top-actions">
+          <div class="search">
+            <svg class="icon"><use href="#i-search"></use></svg>
+            <input id="globalSearch" type="search" placeholder="Search activities, learners, sync logs">
+          </div>
+          <div class="pill-row" id="connectionPills"></div>
+        </div>
+      </header>
+
+      <section class="view active" id="dashboard">
+        <div class="metric-grid" id="metricGrid"></div>
+        <div class="dashboard-grid">
+          <div class="card visual-card">
+            <img class="flow-visual" src="coach-portal-flow.png" alt="Coach activity flow from portal to Sync CRM and Google Classroom">
+            <div class="sync-strip" id="syncStrip"></div>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2>Today</h2>
+                <p>Live and pending activity work.</p>
+              </div>
+              <button class="icon-btn" data-action="open-modal" aria-label="Add activity"><svg class="icon"><use href="#i-plus"></use></svg></button>
+            </div>
+            <div class="activity-list" id="todayList"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="activities">
+        <div class="section-tools">
+          <div class="section-title">
+            <h2>Activity Library</h2>
+            <p>Reusable coaching sessions, assignments, and follow-ups.</p>
+          </div>
+          <div class="tool-row">
+            <div class="select-wrap">
+              <select id="activityFilter" aria-label="Filter activities">
+                <option value="all">All activity types</option>
+                <option value="Live">Live</option>
+                <option value="Assignment">Assignment</option>
+                <option value="Check-in">Check-in</option>
+                <option value="Workshop">Workshop</option>
+              </select>
+            </div>
+            <button class="btn primary" data-action="open-modal"><svg class="icon"><use href="#i-plus"></use></svg>Add Activity</button>
+          </div>
+        </div>
+        <div class="activity-grid" id="activityGrid"></div>
+      </section>
+
+      <section class="view" id="schedule">
+        <div class="section-tools">
+          <div class="section-title">
+            <h2>Coach Schedule</h2>
+            <p>Week-at-a-glance activity delivery.</p>
+          </div>
+          <div class="tool-row">
+            <button class="btn" id="autoPlanBtn"><svg class="icon"><use href="#i-calendar"></use></svg>Auto Plan</button>
+            <button class="btn" data-action="run-sync"><svg class="icon"><use href="#i-sync"></use></svg>Run Sync</button>
+          </div>
+        </div>
+        <div class="calendar-grid" id="calendarGrid"></div>
+      </section>
+
+      <section class="view" id="learners">
+        <div class="section-tools">
+          <div class="section-title">
+            <h2>Learner Roster</h2>
+            <p>Coach groups, progress, CRM status, and classroom links.</p>
+          </div>
+          <div class="tool-row">
+            <button class="btn" id="refreshRoster"><svg class="icon"><use href="#i-users"></use></svg>Refresh Roster</button>
+            <button class="btn" data-action="export-json"><svg class="icon"><use href="#i-download"></use></svg>Export</button>
+          </div>
+        </div>
+        <div class="table-shell">
+          <table>
+            <thead>
+              <tr>
+                <th>Learner</th>
+                <th>Group</th>
+                <th>Next Activity</th>
+                <th>Progress</th>
+                <th>Sync CRM</th>
+                <th>Classroom</th>
+              </tr>
+            </thead>
+            <tbody id="learnerTable"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="view" id="sync">
+        <div class="section-tools">
+          <div class="section-title">
+            <h2>Sync Center</h2>
+            <p>Connection settings, field mapping, and job history.</p>
+          </div>
+          <div class="tool-row">
+            <button class="btn primary" data-action="run-sync"><svg class="icon"><use href="#i-play"></use></svg>Run Sync</button>
+            <button class="btn" data-action="export-json"><svg class="icon"><use href="#i-download"></use></svg>Export Mapping</button>
+          </div>
+        </div>
+
+        <div class="sync-grid">
+          <form class="connection-card" id="crmForm">
+            <div class="connection-top">
+              <div class="connection-icon"><svg class="icon"><use href="#i-plug"></use></svg></div>
+              <div>
+                <h3>Sync CRM</h3>
+                <p id="crmLastSync">Not connected</p>
+              </div>
+              <span class="status coral" id="crmStatus">Offline</span>
+            </div>
+            <div class="form-grid">
+              <div class="field">
+                <label for="crmBaseUrl">Base URL</label>
+                <input id="crmBaseUrl" name="baseUrl" type="url" placeholder="https://sync-crm.example.com/api">
+              </div>
+              <div class="field">
+                <label for="crmWorkspace">Workspace</label>
+                <input id="crmWorkspace" name="workspace" type="text" placeholder="Coach Success">
+              </div>
+              <div class="field full">
+                <label for="crmApiKey">API Key</label>
+                <input id="crmApiKey" name="apiKey" type="password" placeholder="sync_crm_key">
+              </div>
+            </div>
+            <div class="connection-actions">
+              <button class="btn" type="button" data-action="test-crm"><svg class="icon"><use href="#i-check"></use></svg>Test</button>
+              <button class="btn primary" type="submit"><svg class="icon"><use href="#i-plug"></use></svg>Save</button>
+            </div>
+          </form>
+
+          <form class="connection-card" id="classroomForm">
+            <div class="connection-top">
+              <div class="connection-icon"><svg class="icon"><use href="#i-lock"></use></svg></div>
+              <div>
+                <h3>Google Classroom</h3>
+                <p id="classroomLastSync">Not connected</p>
+              </div>
+              <span class="status coral" id="classroomStatus">Offline</span>
+            </div>
+            <div class="form-grid">
+              <div class="field">
+                <label for="classroomCourseId">Course ID</label>
+                <input id="classroomCourseId" name="courseId" type="text" placeholder="course_12345">
+              </div>
+              <div class="field">
+                <label for="classroomClientId">OAuth Client ID</label>
+                <input id="classroomClientId" name="clientId" type="text" placeholder="client-id.apps.googleusercontent.com">
+              </div>
+              <div class="field full">
+                <label for="classroomScope">Scopes</label>
+                <input id="classroomScope" name="scope" type="text" value="classroom.coursework.me classroom.rosters.readonly">
+              </div>
+            </div>
+            <div class="connection-actions">
+              <button class="btn" type="button" data-action="test-classroom"><svg class="icon"><use href="#i-check"></use></svg>Test</button>
+              <button class="btn primary" type="submit"><svg class="icon"><use href="#i-plug"></use></svg>Save</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="mapping-grid">
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2>Field Mapping</h2>
+                <p>Portal activity fields mapped to Sync CRM and Classroom.</p>
+              </div>
+            </div>
+            <div class="table-shell">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Portal</th>
+                    <th>Sync CRM</th>
+                    <th>Classroom</th>
+                    <th>Direction</th>
+                  </tr>
+                </thead>
+                <tbody id="mappingTable"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2>Sync Log</h2>
+                <p>Recent connection and export jobs.</p>
+              </div>
+              <button class="icon-btn" id="clearLog" aria-label="Clear sync log"><svg class="icon"><use href="#i-x"></use></svg></button>
+            </div>
+            <div class="sync-log" id="syncLog"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="insights">
+        <div class="section-tools">
+          <div class="section-title">
+            <h2>Coach Insights</h2>
+            <p>Engagement, completion, and activity readiness.</p>
+          </div>
+          <div class="tool-row">
+            <button class="btn" data-action="run-sync"><svg class="icon"><use href="#i-sync"></use></svg>Update</button>
+          </div>
+        </div>
+        <div class="insight-grid">
+          <div class="stat-tile">
+            <div class="card-header">
+              <div>
+                <h2>Completion Mix</h2>
+                <p>Current learner activity outcomes.</p>
+              </div>
+            </div>
+            <div class="donut"><strong id="completionPercent">72%</strong></div>
+          </div>
+          <div class="stat-tile">
+            <div class="card-header">
+              <div>
+                <h2>Focus Areas</h2>
+                <p>Most assigned coaching themes.</p>
+              </div>
+            </div>
+            <div class="compact-list" id="focusList"></div>
+          </div>
+          <div class="stat-tile">
+            <div class="card-header">
+              <div>
+                <h2>Integration Queue</h2>
+                <p>Records staged for CRM and Classroom.</p>
+              </div>
+            </div>
+            <div class="compact-list" id="queueList"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="settings">
+        <div class="settings-grid">
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2>Portal Session</h2>
+                <p>Local workspace identity.</p>
+              </div>
+            </div>
+            <div class="compact-list">
+              <div class="compact-row">
+                <div>
+                  <h3>Session ID</h3>
+                  <p>019f36dd-0e70-7de3-89bc-0bfcb643a766</p>
+                </div>
+                <span class="status green">Active</span>
+              </div>
+              <div class="compact-row">
+                <div>
+                  <h3>Storage</h3>
+                  <p>Browser localStorage</p>
+                </div>
+                <span class="status">Local</span>
+              </div>
+              <div class="compact-row">
+                <div>
+                  <h3>Export Format</h3>
+                  <p>JSON mapping payload</p>
+                </div>
+                <button class="icon-btn" data-action="export-json" aria-label="Export portal JSON"><svg class="icon"><use href="#i-download"></use></svg></button>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2>Automation Rules</h2>
+                <p>Activity status, roster updates, and notifications.</p>
+              </div>
+            </div>
+            <div class="toggle-row" id="automationRules"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="activityModal" role="dialog" aria-modal="true" aria-labelledby="activityModalTitle">
+    <form class="modal" id="activityForm">
+      <div class="modal-header">
+        <h2 id="activityModalTitle">Add Activity</h2>
+        <button class="icon-btn" type="button" data-action="close-modal" aria-label="Close"><svg class="icon"><use href="#i-x"></use></svg></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <div class="field">
+            <label for="activityTitle">Title</label>
+            <input id="activityTitle" name="title" required type="text" placeholder="Career values workshop">
+          </div>
+          <div class="field">
+            <label for="activityType">Type</label>
+            <select id="activityType" name="type">
+              <option>Live</option>
+              <option>Assignment</option>
+              <option>Check-in</option>
+              <option>Workshop</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="activityFocus">Focus</label>
+            <input id="activityFocus" name="focus" type="text" placeholder="Career readiness">
+          </div>
+          <div class="field">
+            <label for="activityDuration">Minutes</label>
+            <input id="activityDuration" name="duration" type="number" min="5" step="5" value="45">
+          </div>
+          <div class="field">
+            <label for="activityGroup">Group</label>
+            <input id="activityGroup" name="group" type="text" placeholder="Onboarding">
+          </div>
+          <div class="field">
+            <label for="activityDue">Due</label>
+            <select id="activityDue" name="due">
+              <option>Today</option>
+              <option>Tomorrow</option>
+              <option>This week</option>
+              <option>Next week</option>
+            </select>
+          </div>
+          <div class="field full">
+            <label for="activityObjective">Objective</label>
+            <textarea id="activityObjective" name="objective" placeholder="Learners identify the next action they will take before the next coaching touchpoint."></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" type="button" data-action="close-modal">Cancel</button>
+        <button class="btn primary" type="submit"><svg class="icon"><use href="#i-plus"></use></svg>Save Activity</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="toast" id="toast" aria-live="polite"></div>
+
+  <script>
+    const SESSION_ID = "019f36dd-0e70-7de3-89bc-0bfcb643a766";
+    const STORE_KEY = "coachPortal:" + SESSION_ID;
+
+    const seed = {
+      connections: {
+        crm: {
+          connected: false,
+          baseUrl: "https://sync-crm.example.com/api",
+          workspace: "Coach Success",
+          apiKey: "",
+          lastSync: "Not connected"
+        },
+        classroom: {
+          connected: false,
+          courseId: "course_12345",
+          clientId: "",
+          scope: "classroom.coursework.me classroom.rosters.readonly",
+          lastSync: "Not connected"
+        }
+      },
+      activities: [
+        {
+          id: "act-101",
+          title: "Goal Mapping Circle",
+          type: "Live",
+          focus: "Goal setting",
+          duration: 45,
+          group: "Onboarding",
+          due: "Today",
+          objective: "Learners turn broad goals into a measurable next action.",
+          status: "Ready",
+          assigned: 18,
+          completed: 12,
+          color: "#0d8278"
+        },
+        {
+          id: "act-102",
+          title: "Resume Evidence Sprint",
+          type: "Assignment",
+          focus: "Career readiness",
+          duration: 30,
+          group: "Career Lab",
+          due: "Today",
+          objective: "Learners add evidence-backed outcomes to one resume section.",
+          status: "Draft",
+          assigned: 24,
+          completed: 8,
+          color: "#cf5c42"
+        },
+        {
+          id: "act-103",
+          title: "Weekly Progress Check",
+          type: "Check-in",
+          focus: "Accountability",
+          duration: 15,
+          group: "Momentum",
+          due: "Tomorrow",
+          objective: "Coach captures blockers and assigns one follow-up action.",
+          status: "Scheduled",
+          assigned: 31,
+          completed: 22,
+          color: "#366a9f"
+        },
+        {
+          id: "act-104",
+          title: "Interview Story Lab",
+          type: "Workshop",
+          focus: "Communication",
+          duration: 60,
+          group: "Career Lab",
+          due: "This week",
+          objective: "Learners rehearse concise examples using a structured story format.",
+          status: "Ready",
+          assigned: 16,
+          completed: 10,
+          color: "#d59a2b"
+        },
+        {
+          id: "act-105",
+          title: "Confidence Reflection",
+          type: "Assignment",
+          focus: "Mindset",
+          duration: 20,
+          group: "Momentum",
+          due: "Next week",
+          objective: "Learners reflect on confidence shifts and pick one practice task.",
+          status: "Ready",
+          assigned: 28,
+          completed: 18,
+          color: "#3f8f55"
+        },
+        {
+          id: "act-106",
+          title: "Resource Match Review",
+          type: "Check-in",
+          focus: "Support planning",
+          duration: 25,
+          group: "Onboarding",
+          due: "This week",
+          objective: "Coach matches learner barriers to services, contacts, or next steps.",
+          status: "Scheduled",
+          assigned: 12,
+          completed: 7,
+          color: "#6f5aa8"
+        }
+      ],
+      learners: [
+        { name: "Ari Brown", group: "Onboarding", next: "Goal Mapping Circle", progress: 78, crm: "Lead updated", classroom: "Enrolled" },
+        { name: "Maya Chen", group: "Career Lab", next: "Resume Evidence Sprint", progress: 46, crm: "Task open", classroom: "Assignment sent" },
+        { name: "Jordan Ellis", group: "Momentum", next: "Weekly Progress Check", progress: 84, crm: "Contact synced", classroom: "Enrolled" },
+        { name: "Sam Rivera", group: "Career Lab", next: "Interview Story Lab", progress: 62, crm: "Opportunity linked", classroom: "Draft pending" },
+        { name: "Noah Patel", group: "Onboarding", next: "Resource Match Review", progress: 52, crm: "Lead updated", classroom: "Enrolled" },
+        { name: "Leah Green", group: "Momentum", next: "Confidence Reflection", progress: 73, crm: "Contact synced", classroom: "Assignment sent" }
+      ],
+      mappings: [
+        { portal: "Learner name", crm: "contact.full_name", classroom: "student.name", direction: "Both ways" },
+        { portal: "Activity title", crm: "activity.subject", classroom: "courseWork.title", direction: "Portal out" },
+        { portal: "Due date", crm: "task.due_at", classroom: "courseWork.dueDate", direction: "Portal out" },
+        { portal: "Completion", crm: "activity.completed_at", classroom: "submission.state", direction: "Both ways" },
+        { portal: "Coach note", crm: "note.body", classroom: "privateComment.text", direction: "Portal out" },
+        { portal: "Group", crm: "cohort.name", classroom: "course.section", direction: "CRM in" }
+      ],
+      log: [
+        { type: "info", title: "Portal initialized", detail: "Session " + SESSION_ID, time: "Today 13:26" },
+        { type: "warn", title: "Connections pending", detail: "Save Sync CRM and Google Classroom settings", time: "Today 13:27" }
+      ],
+      rules: [
+        { id: "rule-1", title: "Create Classroom draft for new assignments", detail: "Assignment activities stage as Classroom coursework.", enabled: true },
+        { id: "rule-2", title: "Write completion notes back to Sync CRM", detail: "Completed learner work updates CRM activity history.", enabled: true },
+        { id: "rule-3", title: "Flag stalled learners after seven days", detail: "Roster progress below 50 percent creates a CRM follow-up.", enabled: false },
+        { id: "rule-4", title: "Auto-archive completed activities", detail: "Completed activity cards move out of the default library view.", enabled: false }
+      ]
+    };
+
+    let state = loadState();
+    let activeView = "dashboard";
+    let query = "";
+
+    const titles = {
+      dashboard: ["Dashboard", "Coach activities, roster momentum, and integration health in one workspace."],
+      activities: ["Activities", "Build, assign, and track the coaching activities that feed your systems."],
+      schedule: ["Schedule", "Plan activity delivery across the coaching week."],
+      learners: ["Learners", "Follow people, progress, and connected records."],
+      sync: ["Sync Center", "Prepare Sync CRM and Google Classroom connections."],
+      insights: ["Insights", "Measure participation, readiness, and sync throughput."],
+      settings: ["Settings", "Session-level portal controls and automation rules."]
+    };
+
+    function loadState() {
+      try {
+        const stored = localStorage.getItem(STORE_KEY);
+        return stored ? JSON.parse(stored) : structuredClone(seed);
+      } catch (error) {
+        return structuredClone(seed);
+      }
+    }
+
+    function persist() {
+      localStorage.setItem(STORE_KEY, JSON.stringify(state));
+      document.getElementById("saveState").textContent = "Saved " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    }
+
+    function icon(name) {
+      return '<svg class="icon"><use href="#i-' + name + '"></use></svg>';
+    }
+
+    function statusClass(status) {
+      if (status === "Ready" || status === "Enrolled" || status === "Connected") return "green";
+      if (status === "Draft" || status === "Draft pending" || status === "Queued") return "amber";
+      if (status === "Offline" || status === "Task open") return "coral";
+      return "";
+    }
+
+    function nowLabel() {
+      return "Today " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    }
+
+    function filterText(item) {
+      return JSON.stringify(item).toLowerCase();
+    }
+
+    function matchesQuery(item) {
+      return !query || filterText(item).includes(query);
+    }
+
+    function renderAll() {
+      renderConnectionPills();
+      renderMetrics();
+      renderSyncStrip();
+      renderToday();
+      renderActivities();
+      renderCalendar();
+      renderLearners();
+      renderSync();
+      renderInsights();
+      renderRules();
+    }
+
+    function renderConnectionPills() {
+      const crm = state.connections.crm.connected;
+      const classroom = state.connections.classroom.connected;
+      document.getElementById("connectionPills").innerHTML = [
+        '<span class="pill"><span class="dot ' + (crm ? "ok" : "warn") + '"></span><strong>Sync CRM</strong>' + (crm ? "Connected" : "Pending") + '</span>',
+        '<span class="pill"><span class="dot ' + (classroom ? "ok" : "warn") + '"></span><strong>Classroom</strong>' + (classroom ? "Connected" : "Pending") + '</span>'
+      ].join("");
+    }
+
+    function renderMetrics() {
+      const learners = state.learners.length;
+      const ready = state.activities.filter(activity => activity.status === "Ready").length;
+      const dueToday = state.activities.filter(activity => activity.due === "Today").length;
+      const completion = completionRate();
+      const metrics = [
+        { label: "Active learners", value: learners, trend: "+4 this month", tone: "" },
+        { label: "Ready activities", value: ready, trend: ready + " publishable", tone: "" },
+        { label: "Due today", value: dueToday, trend: dueToday ? "Action needed" : "Clear", tone: dueToday ? "warn" : "" },
+        { label: "Completion", value: completion + "%", trend: "Across assignments", tone: completion < 60 ? "bad" : "" }
+      ];
+      document.getElementById("metricGrid").innerHTML = metrics.map((metric, index) => {
+        const heights = [
+          [45, 56, 34, 70, 62, 80, 74],
+          [38, 42, 58, 48, 76, 65, 82],
+          [62, 45, 36, 54, 42, 58, 30],
+          [50, 66, 72, 64, 70, 78, 86]
+        ][index];
+        return '<article class="metric-card">' +
+          '<div><span class="metric-label">' + metric.label + '</span><strong>' + metric.value + '</strong></div>' +
+          '<div class="chart-bars">' + heights.map(height => '<span style="height:' + height + '%"></span>').join("") + '</div>' +
+          '<span class="trend ' + metric.tone + '">' + icon(metric.tone === "bad" ? "x" : "arrow") + metric.trend + '</span>' +
+        '</article>';
+      }).join("");
+    }
+
+    function renderSyncStrip() {
+      const ready = state.activities.filter(activity => activity.status === "Ready").length;
+      const queued = state.activities.length + state.learners.length;
+      const crmLabel = state.connections.crm.connected ? "CRM field map active" : "CRM settings saved locally";
+      const classroomLabel = state.connections.classroom.connected ? "Coursework map active" : "Classroom OAuth pending";
+      document.getElementById("syncStrip").innerHTML = [
+        '<div><strong>' + ready + ' ready activities</strong><span>Coach portal source</span></div>',
+        '<div><strong>' + queued + ' queued records</strong><span>' + crmLabel + '</span></div>',
+        '<div><strong>' + state.learners.length + ' roster links</strong><span>' + classroomLabel + '</span></div>'
+      ].join("");
+    }
+
+    function renderToday() {
+      const list = state.activities.filter(activity => activity.due === "Today" && matchesQuery(activity));
+      document.getElementById("todayList").innerHTML = list.length ? list.map(activityRow).join("") : '<div class="empty">No matching activity work today.</div>';
+    }
+
+    function activityRow(activity) {
+      return '<article class="activity-row">' +
+        '<div><h3>' + activity.title + '</h3><p>' + activity.group + ' · ' + activity.focus + ' · ' + activity.duration + ' min</p></div>' +
+        '<span class="status ' + statusClass(activity.status) + '">' + activity.status + '</span>' +
+      '</article>';
+    }
+
+    function renderActivities() {
+      const filter = document.getElementById("activityFilter").value;
+      const activities = state.activities.filter(activity => (filter === "all" || activity.type === filter) && matchesQuery(activity));
+      document.getElementById("activityGrid").innerHTML = activities.length ? activities.map(activity => {
+        const pct = Math.round((activity.completed / Math.max(activity.assigned, 1)) * 100);
+        return '<article class="activity-card">' +
+          '<div class="activity-band" style="background:' + activity.color + '"></div>' +
+          '<div class="activity-body">' +
+            '<div class="activity-meta"><span class="chip">' + activity.type + '</span><span class="chip">' + activity.focus + '</span><span class="status ' + statusClass(activity.status) + '">' + activity.status + '</span></div>' +
+            '<div><h3>' + activity.title + '</h3><p>' + activity.objective + '</p></div>' +
+            '<div class="progress"><div class="progress-label"><span>' + activity.completed + ' of ' + activity.assigned + ' complete</span><span>' + pct + '%</span></div><div class="progress-track"><span style="width:' + Math.min(pct, 100) + '%"></span></div></div>' +
+            '<div class="activity-actions">' +
+              '<button class="icon-btn" title="Assign" aria-label="Assign ' + activity.title + '" data-assign="' + activity.id + '">' + icon("users") + '</button>' +
+              '<button class="btn" data-stage="' + activity.id + '">' + icon("sync") + 'Stage</button>' +
+            '</div>' +
+          '</div>' +
+        '</article>';
+      }).join("") : '<div class="empty">No activities match the current filters.</div>';
+    }
+
+    function renderCalendar() {
+      const days = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+      const slots = ["9:00", "11:00", "1:00", "3:00"];
+      const scheduled = [
+        ["Goal Mapping Circle", 0, 0, "#d9eeea"],
+        ["Resume Evidence Sprint", 1, 1, "#f8ddd6"],
+        ["Weekly Progress Check", 2, 2, "#e2ebf5"],
+        ["Interview Story Lab", 3, 1, "#faedcf"],
+        ["Resource Match Review", 4, 3, "#deefd9"]
+      ];
+      let html = '<div class="calendar-cell calendar-head"></div>' + days.map(day => '<div class="calendar-cell calendar-head">' + day + '</div>').join("");
+      slots.forEach((slot, row) => {
+        html += '<div class="calendar-cell calendar-time">' + slot + '</div>';
+        days.forEach((day, col) => {
+          const event = scheduled.find(item => item[1] === col && item[2] === row);
+          html += '<div class="calendar-cell">' + (event ? '<div class="event" style="background:' + event[3] + '"><strong>' + event[0] + '</strong><span>' + day + ' ' + slot + '</span></div>' : "") + '</div>';
+        });
+      });
+      document.getElementById("calendarGrid").innerHTML = html;
+    }
+
+    function renderLearners() {
+      const learners = state.learners.filter(matchesQuery);
+      document.getElementById("learnerTable").innerHTML = learners.map(learner => {
+        const initials = learner.name.split(" ").map(part => part[0]).join("");
+        return '<tr>' +
+          '<td><div class="person"><span class="avatar">' + initials + '</span><div><strong>' + learner.name + '</strong><br><span class="chip">Coach active</span></div></div></td>' +
+          '<td>' + learner.group + '</td>' +
+          '<td>' + learner.next + '</td>' +
+          '<td><div class="progress"><div class="progress-label"><span>' + learner.progress + '%</span><span></span></div><div class="progress-track"><span style="width:' + learner.progress + '%"></span></div></div></td>' +
+          '<td><span class="status ' + statusClass(learner.crm) + '">' + learner.crm + '</span></td>' +
+          '<td><span class="status ' + statusClass(learner.classroom) + '">' + learner.classroom + '</span></td>' +
+        '</tr>';
+      }).join("");
+    }
+
+    function renderSync() {
+      const crm = state.connections.crm;
+      const classroom = state.connections.classroom;
+      document.getElementById("crmBaseUrl").value = crm.baseUrl;
+      document.getElementById("crmWorkspace").value = crm.workspace;
+      document.getElementById("crmApiKey").value = crm.apiKey;
+      document.getElementById("classroomCourseId").value = classroom.courseId;
+      document.getElementById("classroomClientId").value = classroom.clientId;
+      document.getElementById("classroomScope").value = classroom.scope;
+      updateConnectionStatus("crm", crm.connected, crm.lastSync);
+      updateConnectionStatus("classroom", classroom.connected, classroom.lastSync);
+
+      document.getElementById("mappingTable").innerHTML = state.mappings.map(map => '<tr>' +
+        '<td><strong>' + map.portal + '</strong></td>' +
+        '<td><code>' + map.crm + '</code></td>' +
+        '<td><code>' + map.classroom + '</code></td>' +
+        '<td>' + map.direction + '</td>' +
+      '</tr>').join("");
+
+      const logs = state.log.filter(matchesQuery).slice(0, 8);
+      document.getElementById("syncLog").innerHTML = logs.length ? logs.map(log => '<article class="log-row">' +
+        '<div class="log-icon">' + icon(log.type === "warn" ? "filter" : log.type === "success" ? "check" : "sync") + '</div>' +
+        '<div><h3>' + log.title + '</h3><p>' + log.detail + '</p></div>' +
+        '<span class="chip">' + log.time + '</span>' +
+      '</article>').join("") : '<div class="empty">No sync log entries.</div>';
+    }
+
+    function updateConnectionStatus(kind, connected, lastSync) {
+      const status = document.getElementById(kind + "Status");
+      const label = document.getElementById(kind + "LastSync");
+      status.textContent = connected ? "Connected" : "Offline";
+      status.className = "status " + (connected ? "green" : "coral");
+      label.textContent = lastSync;
+    }
+
+    function renderInsights() {
+      const completion = completionRate();
+      document.getElementById("completionPercent").textContent = completion + "%";
+      document.querySelector(".donut").style.background = "conic-gradient(var(--teal) 0 " + completion + "%, var(--amber) " + completion + "% 88%, #e4e9e6 88%)";
+      const counts = state.activities.reduce((acc, activity) => {
+        acc[activity.focus] = (acc[activity.focus] || 0) + 1;
+        return acc;
+      }, {});
+      document.getElementById("focusList").innerHTML = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([focus, count]) =>
+        '<div class="compact-row"><div><h3>' + focus + '</h3><p>' + count + ' linked activities</p></div><span class="status">' + count + '</span></div>'
+      ).join("");
+
+      const queue = [
+        ["Sync CRM activities", state.activities.length],
+        ["Classroom coursework drafts", state.activities.filter(activity => activity.type === "Assignment").length],
+        ["Roster records", state.learners.length]
+      ];
+      document.getElementById("queueList").innerHTML = queue.map(item =>
+        '<div class="compact-row"><div><h3>' + item[0] + '</h3><p>Ready for next sync job</p></div><span class="status amber">' + item[1] + '</span></div>'
+      ).join("");
+    }
+
+    function renderRules() {
+      document.getElementById("automationRules").innerHTML = state.rules.map(rule => '<div class="toggle">' +
+        '<div><strong>' + rule.title + '</strong><span>' + rule.detail + '</span></div>' +
+        '<button class="switch ' + (rule.enabled ? "on" : "") + '" data-rule="' + rule.id + '" aria-label="Toggle ' + rule.title + '"></button>' +
+      '</div>').join("");
+    }
+
+    function completionRate() {
+      const assigned = state.activities.reduce((sum, activity) => sum + activity.assigned, 0);
+      const completed = state.activities.reduce((sum, activity) => sum + activity.completed, 0);
+      return Math.round((completed / Math.max(assigned, 1)) * 100);
+    }
+
+    function addLog(type, title, detail) {
+      state.log.unshift({ type, title, detail, time: nowLabel() });
+      state.log = state.log.slice(0, 24);
+      persist();
+      renderAll();
+    }
+
+    function toast(message) {
+      const host = document.getElementById("toast");
+      const item = document.createElement("div");
+      item.textContent = message;
+      host.appendChild(item);
+      setTimeout(() => item.remove(), 2800);
+    }
+
+    function exportJson() {
+      const payload = {
+        sessionId: SESSION_ID,
+        exportedAt: new Date().toISOString(),
+        connections: {
+          crm: {
+            connected: state.connections.crm.connected,
+            baseUrl: state.connections.crm.baseUrl,
+            workspace: state.connections.crm.workspace
+          },
+          classroom: {
+            connected: state.connections.classroom.connected,
+            courseId: state.connections.classroom.courseId,
+            scope: state.connections.classroom.scope
+          }
+        },
+        mappings: state.mappings,
+        activities: state.activities,
+        learners: state.learners
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "coach-portal-sync-mapping.json";
+      link.click();
+      URL.revokeObjectURL(url);
+      addLog("success", "Mapping exported", "JSON payload prepared for backend integration");
+      toast("Mapping exported");
+    }
+
+    function runSync() {
+      const crm = state.connections.crm.connected;
+      const classroom = state.connections.classroom.connected;
+      if (!crm || !classroom) {
+        addLog("warn", "Sync staged", "Save both connections before sending live API jobs");
+        toast("Sync staged locally");
+        return;
+      }
+      const label = nowLabel();
+      state.connections.crm.lastSync = label;
+      state.connections.classroom.lastSync = label;
+      state.learners = state.learners.map(learner => ({
+        ...learner,
+        crm: learner.crm === "Task open" ? "Lead updated" : learner.crm,
+        classroom: learner.classroom === "Draft pending" ? "Assignment sent" : learner.classroom
+      }));
+      addLog("success", "Sync complete", state.activities.length + " activities and " + state.learners.length + " learners processed");
+      toast("Sync complete");
+    }
+
+    function saveConnection(kind, form) {
+      const data = Object.fromEntries(new FormData(form).entries());
+      state.connections[kind] = {
+        ...state.connections[kind],
+        ...data,
+        connected: true,
+        lastSync: "Saved " + nowLabel()
+      };
+      addLog("success", (kind === "crm" ? "Sync CRM" : "Google Classroom") + " saved", "Connection settings stored for this session");
+      toast((kind === "crm" ? "Sync CRM" : "Classroom") + " saved");
+    }
+
+    function stageActivity(id) {
+      const activity = state.activities.find(item => item.id === id);
+      if (!activity) return;
+      activity.status = "Ready";
+      addLog("success", "Activity staged", activity.title + " queued for CRM and Classroom");
+      toast("Activity staged");
+    }
+
+    function assignActivity(id) {
+      const activity = state.activities.find(item => item.id === id);
+      if (!activity) return;
+      activity.assigned += 1;
+      addLog("info", "Learner assigned", activity.title + " assignment count increased");
+      toast("Activity assigned");
+    }
+
+    function openModal() {
+      document.getElementById("activityModal").classList.add("active");
+      document.getElementById("activityTitle").focus();
+    }
+
+    function closeModal() {
+      document.getElementById("activityModal").classList.remove("active");
+      document.getElementById("activityForm").reset();
+      document.getElementById("activityDuration").value = 45;
+    }
+
+    document.querySelectorAll(".nav button").forEach(button => {
+      button.addEventListener("click", () => {
+        activeView = button.dataset.view;
+        document.querySelectorAll(".nav button").forEach(item => item.classList.toggle("active", item === button));
+        document.querySelectorAll(".view").forEach(view => view.classList.toggle("active", view.id === activeView));
+        document.getElementById("viewTitle").textContent = titles[activeView][0];
+        document.getElementById("viewSubtitle").textContent = titles[activeView][1];
+        document.body.classList.remove("menu-open");
+        window.scrollTo(0, 0);
+      });
+    });
+
+    document.getElementById("menuToggle").addEventListener("click", () => document.body.classList.toggle("menu-open"));
+    document.getElementById("globalSearch").addEventListener("input", event => {
+      query = event.target.value.trim().toLowerCase();
+      renderAll();
+    });
+    document.getElementById("activityFilter").addEventListener("change", renderActivities);
+    document.getElementById("crmForm").addEventListener("submit", event => {
+      event.preventDefault();
+      saveConnection("crm", event.currentTarget);
+    });
+    document.getElementById("classroomForm").addEventListener("submit", event => {
+      event.preventDefault();
+      saveConnection("classroom", event.currentTarget);
+    });
+    document.getElementById("activityForm").addEventListener("submit", event => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+      const colors = ["#0d8278", "#cf5c42", "#d59a2b", "#366a9f", "#3f8f55", "#6f5aa8"];
+      const activity = {
+        id: "act-" + Date.now(),
+        title: data.title,
+        type: data.type,
+        focus: data.focus || "Coaching",
+        duration: Number(data.duration || 45),
+        group: data.group || "General",
+        due: data.due,
+        objective: data.objective || "Learners complete the assigned coaching activity.",
+        status: "Draft",
+        assigned: 0,
+        completed: 0,
+        color: colors[state.activities.length % colors.length]
+      };
+      state.activities.unshift(activity);
+      persist();
+      closeModal();
+      renderAll();
+      addLog("info", "Activity created", activity.title + " added to the portal library");
+      toast("Activity added");
+    });
+
+    document.body.addEventListener("click", event => {
+      const action = event.target.closest("[data-action]");
+      if (action) {
+        const value = action.dataset.action;
+        if (value === "open-modal") openModal();
+        if (value === "close-modal") closeModal();
+        if (value === "run-sync") runSync();
+        if (value === "export-json") exportJson();
+        if (value === "test-crm") {
+          addLog("success", "Sync CRM test passed", "Endpoint format and workspace fields are ready");
+          state.connections.crm.lastSync = "Tested " + nowLabel();
+          persist();
+          renderAll();
+          toast("CRM test passed");
+        }
+        if (value === "test-classroom") {
+          addLog("success", "Classroom test passed", "Course and OAuth fields are ready");
+          state.connections.classroom.lastSync = "Tested " + nowLabel();
+          persist();
+          renderAll();
+          toast("Classroom test passed");
+        }
+      }
+      const stage = event.target.closest("[data-stage]");
+      if (stage) stageActivity(stage.dataset.stage);
+      const assign = event.target.closest("[data-assign]");
+      if (assign) assignActivity(assign.dataset.assign);
+      const rule = event.target.closest("[data-rule]");
+      if (rule) {
+        const found = state.rules.find(item => item.id === rule.dataset.rule);
+        if (found) {
+          found.enabled = !found.enabled;
+          persist();
+          renderRules();
+          toast(found.enabled ? "Rule enabled" : "Rule disabled");
+        }
+      }
+    });
+
+    document.getElementById("clearLog").addEventListener("click", () => {
+      state.log = [];
+      persist();
+      renderAll();
+      toast("Sync log cleared");
+    });
+
+    document.getElementById("refreshRoster").addEventListener("click", () => {
+      state.learners = state.learners.map((learner, index) => ({
+        ...learner,
+        progress: Math.min(100, learner.progress + (index % 3) + 1)
+      }));
+      addLog("success", "Roster refreshed", state.learners.length + " learners updated from staged records");
+      toast("Roster refreshed");
+    });
+
+    document.getElementById("autoPlanBtn").addEventListener("click", () => {
+      state.activities = state.activities.map((activity, index) => ({
+        ...activity,
+        due: index < 2 ? "Today" : index < 4 ? "This week" : activity.due
+      }));
+      addLog("info", "Schedule planned", "Activities placed into the current coaching week");
+      toast("Schedule planned");
+    });
+
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape") closeModal();
+    });
+
+    renderAll();
+  </script>
+</body>
+</html>
