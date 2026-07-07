@@ -13,6 +13,7 @@ const APP = {
   studentStatuses: ["Active", "Inactive", "Dropped", "Completed", "On Hold"],
   certificateStatuses: ["Not Eligible", "For Review", "Approved", "Issued"],
   activityStatuses: ["Pending", "Pass", "Fail", "Retake"],
+  planOptions: ["2 Weeks", "1 Month"],
   defaultActivities: {
     AUBK: [
       "Xero Activity 1 - Asset, Liability, Income, Capital, Expense",
@@ -61,6 +62,15 @@ const APP = {
       "Day 8 - Bank Transactions",
       "Day 9 - Reconciliation",
       "Day 10 - Reports"
+    ],
+    CAP: [
+      "ATS Resume Creation",
+      "Resume Optimization",
+      "Interview Practice",
+      "Mock Interview",
+      "Mock Call",
+      "Client Communication Practice",
+      "Job Application Readiness"
     ]
   }
 };
@@ -392,7 +402,7 @@ async function renderStudents() {
   let query = state.supabase
     .from("students")
     .select(`
-      id, first_name, last_name, email, phone, coach, course_group_id, batch_id, updated_at,
+      id, first_name, last_name, email, phone, coach, training_plan, course_group_id, batch_id, updated_at,
       course_group:course_groups(code,name),
       batch:batches(name,month,year,batch_number),
       finance:finance_records!inner(payment_status),
@@ -406,6 +416,7 @@ async function renderStudents() {
   if (f.courseGroup) query = query.eq("course_group_id", f.courseGroup);
   if (f.batch) query = query.eq("batch_id", f.batch);
   if ((f.month || f.year) && !f.batch) query = query.in("batch_id", batchIdsForPeriod(f.month, f.year, f.courseGroup));
+  if (f.plan) query = query.eq("training_plan", f.plan);
   if (f.finance) query = query.eq("finance.payment_status", f.finance);
   if (f.admin) query = query.eq("admin.student_status", f.admin);
   if (f.certificate) query = query.eq("certificates.status", f.certificate);
@@ -434,6 +445,7 @@ async function renderStudents() {
       ${selectControl("batch", "All batches", filteredBatchOptions(f.courseGroup), f.batch)}
       ${selectControl("month", "All months", APP.months.map((m, i) => [i + 1, m]), f.month)}
       ${yearSelect("year", f.year, "All years")}
+      ${selectControl("plan", "All plans", APP.planOptions.map(v => [v, v]), f.plan)}
       ${selectControl("finance", "All payment statuses", APP.financeStatuses.map(v => [v, v]), f.finance)}
       ${selectControl("admin", "All student statuses", APP.studentStatuses.map(v => [v, v]), f.admin)}
       ${selectControl("certificate", "All certificate statuses", APP.certificateStatuses.map(v => [v, v]), f.certificate)}
@@ -461,7 +473,7 @@ function studentTable(students) {
       <table class="data-table">
         <thead><tr>
           <th class="checkbox-col"><input id="select-visible" type="checkbox" ${allVisibleSelected ? "checked" : ""} aria-label="Select all visible students"></th>
-          <th>Student name</th><th>Email</th><th>Phone</th><th>Course group</th><th>Batch name</th><th>Coach</th><th>Finance status</th><th>Student status</th><th>Certificate status</th><th>Last updated</th><th>Action</th>
+          <th>Student name</th><th>Email</th><th>Phone</th><th>Course group</th><th>Batch name</th><th>Plan</th><th>Coach</th><th>Finance status</th><th>Student status</th><th>Certificate status</th><th>Last updated</th><th>Action</th>
         </tr></thead>
         <tbody>
           ${students.map(student => `
@@ -475,6 +487,7 @@ function studentTable(students) {
               <td>${escapeHtml(student.phone || "—")}</td>
               <td><span class="badge badge--teal">${escapeHtml(student.course_group?.code || "—")}</span></td>
               <td>${escapeHtml(student.batch?.name || "—")}</td>
+              <td>${statusBadge(studentPlan(student))}</td>
               <td>${escapeHtml(student.coach || "Unassigned")}</td>
               <td>${statusBadge(student.finance?.payment_status)}</td>
               <td>${statusBadge(student.admin?.student_status)}</td>
@@ -924,7 +937,7 @@ async function renderCoachChecklist() {
   const { data, error } = await state.supabase
     .from("students")
     .select(`
-      id,first_name,last_name,email,coach,course_group_id,
+      id,first_name,last_name,email,coach,training_plan,course_group_id,
       course_group:course_groups(id,code),
       batch:batches(name),
       classroom:classroom_records(invite_status,date_sent,sent_by),
@@ -942,13 +955,14 @@ async function renderCoachChecklist() {
     <section class="filters" id="coach-filters">
       <div class="filter-search"><span data-icon="search"></span><input class="control" name="search" placeholder="Search student or coach…"></div>
       ${selectControl("course", "All course groups", APP.courseCodes.map(v => [v, v]))}
+      ${selectControl("plan", "All plans", APP.planOptions.map(v => [v, v]))}
       ${selectControl("invite", "All invite statuses", ["Yes", "No", "Pending"].map(v => [v, v]))}
       ${selectControl("requirement", "All readiness", ["Certificate Ready", "Not Ready", "For Review"].map(v => [v, v]))}
       <span class="filter-spacer"></span><span class="filter-count">${students.length} students</span>
     </section>
     <section class="card table-card">
       <div class="table-wrap ${students.length ? "" : "hidden"}"><table class="data-table">
-        <thead><tr><th>Student</th><th>Course group</th><th>Coach</th><th>Classroom invite</th><th>Activities passed</th><th>Average score</th><th>Requirement status</th><th>Action</th></tr></thead>
+        <thead><tr><th>Student</th><th>Course group</th><th>Plan</th><th>Coach</th><th>Classroom invite</th><th>Activities passed</th><th>Average score</th><th>Requirement status</th><th>Action</th></tr></thead>
         <tbody id="coach-table-body">${coachRows(students)}</tbody>
       </table></div>
       <div id="coach-empty" class="${students.length ? "hidden" : ""}">${emptyState("check-square", "No students found", "Try changing the checklist filters.")}</div>
@@ -958,11 +972,13 @@ async function renderCoachChecklist() {
   const apply = () => {
     const term = $("#coach-filters [name=search]").value.toLowerCase().trim();
     const course = $("#coach-filters [name=course]").value;
+    const plan = $("#coach-filters [name=plan]").value;
     const invite = $("#coach-filters [name=invite]").value;
     const requirement = $("#coach-filters [name=requirement]").value;
     const filtered = students.filter(s =>
       (!term || `${fullName(s)} ${s.email || ""} ${s.coach || ""}`.toLowerCase().includes(term)) &&
       (!course || s.course_group?.code === course) &&
+      (!plan || studentPlan(s) === plan) &&
       (!invite || s.classroom?.invite_status === invite) &&
       (!requirement || s.requirements?.overall_status === requirement)
     );
@@ -982,6 +998,7 @@ function coachRows(students) {
     const activities = relevantStudentActivities(student);
     const passed = activities.filter(a => a.status === "Pass").length;
     const scored = activities.filter(a => a.score !== null && a.score !== "");
+    const expectedActivities = activeActivityCountForStudent(student);
     const average = scored.length ? Math.round(scored.reduce((sum, a) => sum + Number(a.score), 0) / scored.length) : null;
     return `
       <tr>
@@ -989,9 +1006,10 @@ function coachRows(students) {
           <span class="student-avatar">${initials(fullName(student))}</span><span><strong>${escapeHtml(fullName(student))}</strong><small>${escapeHtml(student.batch?.name || "")}</small></span>
         </button></td>
         <td><span class="badge badge--teal">${escapeHtml(student.course_group?.code || "—")}</span></td>
+        <td>${statusBadge(studentPlan(student))}</td>
         <td>${escapeHtml(student.coach || "Unassigned")}</td>
         <td>${statusBadge(student.classroom?.invite_status || "Pending")}</td>
-        <td>${passed} / ${activities.length || activeActivityCountForStudent(student)}</td>
+        <td>${passed} / ${Math.max(activities.length, expectedActivities)}</td>
         <td>${average === null ? "—" : `${average}%`}</td>
         <td>${statusBadge(student.requirements?.overall_status || "For Review")}</td>
         <td><button class="icon-btn btn-icon-only" data-coach-student="${student.id}" title="Open coach checklist"><span data-icon="edit-2"></span></button></td>
@@ -1004,26 +1022,46 @@ function bindCoachRows() {
 }
 
 function relevantStudentActivities(student) {
-  const courseId = student.course_group_id || student.course_group?.id || "";
   return (student.student_activities || [])
-    .filter(row => {
-      const activity = row.activity || {};
-      if (activity.is_active === false) return false;
-      if (activity.course_group_id && courseId && activity.course_group_id !== courseId) return false;
-      if (activity.course_group_id && !courseId) return false;
-      return true;
-    })
-    .sort((a, b) => (a.activity?.sort_order || 0) - (b.activity?.sort_order || 0));
+    .filter(row => isRelevantActivityForStudent(student, row.activity || {}))
+    .sort((a, b) => {
+      const trackCompare = activityTrackSort(a.activity) - activityTrackSort(b.activity);
+      return trackCompare || (a.activity?.sort_order || 0) - (b.activity?.sort_order || 0);
+    });
 }
 
 function activeActivityCountForStudent(student) {
-  const courseId = student.course_group_id || student.course_group?.id || "";
-  return state.activities.filter(activity => {
-    if (activity.is_active === false) return false;
-    if (activity.course_group_id && courseId && activity.course_group_id !== courseId) return false;
-    if (activity.course_group_id && !courseId) return false;
-    return true;
-  }).length;
+  return state.activities.filter(activity => isRelevantActivityForStudent(student, activity)).length;
+}
+
+function isRelevantActivityForStudent(student, activity) {
+  if (activity.is_active === false) return false;
+  const track = activityTrack(activity);
+  if (track === "CAP") return studentPlan(student) === "1 Month";
+  if (track !== "Intensive") return false;
+  const intensiveCourseId = intensiveCourseGroupIdForStudent(student);
+  if (activity.course_group_id && intensiveCourseId && activity.course_group_id !== intensiveCourseId) return false;
+  if (activity.course_group_id && !intensiveCourseId) return false;
+  return true;
+}
+
+function activityTrack(activity = {}) {
+  if (activity.activity_track) return activity.activity_track;
+  return activity.course_group_id ? "Intensive" : "CAP";
+}
+
+function activityTrackSort(activity = {}) {
+  return activityTrack(activity) === "CAP" ? 2 : 1;
+}
+
+function studentPlan(student = {}) {
+  return APP.planOptions.includes(student.training_plan) ? student.training_plan : "2 Weeks";
+}
+
+function intensiveCourseGroupIdForStudent(student = {}) {
+  const code = (student.course_group?.code || "").replace(/^CAP\s+/i, "");
+  const intensiveGroup = state.courseGroups.find(group => group.code === code);
+  return intensiveGroup?.id || student.course_group_id || student.course_group?.id || "";
 }
 
 /* ---------- Certificates ---------- */
@@ -1294,6 +1332,7 @@ function openStudentForm(student = null) {
           <option value="">Select course group</option>${optionsHtml(state.courseGroups.filter(c => c.status === "Active" || c.id === groupId).map(c => [c.id, `${c.code} — ${c.name}`]), groupId)}
         </select></label>
         <label class="field"><span>Batch</span><select name="batch_id" required><option value="">Select a course group first</option></select></label>
+        <label class="field"><span>Plan</span><select name="training_plan">${optionsHtml(APP.planOptions, studentPlan(student || {}))}</select></label>
         <label class="field span-2"><span>Coach</span><input name="coach" value="${escapeAttr(student?.coach || "")}" placeholder="Coach name" maxlength="120"></label>
       </form>`,
     footer: `<button class="btn btn--outline" data-close-modal>Cancel</button><button class="btn btn--primary" id="save-student">${student ? "Save changes" : "Add student"}</button>`
@@ -1384,13 +1423,14 @@ function renderStudentProfile() {
             <div class="profile-header-meta">
               <span class="badge badge--teal">${escapeHtml(s.course_group?.code || "No course")}</span>
               <span class="badge badge--neutral">${escapeHtml(s.batch?.name || "No batch")}</span>
+              ${statusBadge(studentPlan(s))}
               ${statusBadge(overall)}
             </div>
           </div>
           <button class="icon-btn" data-close-modal aria-label="Close profile"><span data-icon="x"></span></button>
         </div>
         <nav class="profile-tabs">
-          ${["overview", "finance", "admin", "coaches", "requirements", "certificates", "notes"].map(tab => `<button class="profile-tab ${state.profileTab === tab ? "active" : ""}" data-profile-tab="${tab}">${titleCase(tab)}</button>`).join("")}
+          ${["overview", "plan", "finance", "admin", "coaches", "requirements", "certificates", "notes"].map(tab => `<button class="profile-tab ${state.profileTab === tab ? "active" : ""}" data-profile-tab="${tab}">${titleCase(tab)}</button>`).join("")}
         </nav>
         <div id="profile-content" class="profile-content">${profileTabHtml(state.profileTab)}</div>
       </section>
@@ -1419,6 +1459,7 @@ function profileTabHtml(tab) {
         ${detailItem("Phone", s.phone)}
         ${detailItem("Course group", `${s.course_group?.code || "—"} — ${s.course_group?.name || "—"}`)}
         ${detailItem("Batch", s.batch?.name)}
+        ${detailItem("Plan", studentPlan(s))}
         ${detailItem("Coach", s.coach || "Unassigned")}
         ${detailItem("Finance", s.finance?.payment_status)}
         ${detailItem("Student status", s.admin?.student_status)}
@@ -1426,6 +1467,7 @@ function profileTabHtml(tab) {
         ${detailItem("Created", formatDate(s.created_at))}
         ${detailItem("Last updated", formatDateTime(s.updated_at))}
       </div>`,
+    plan: () => planTabHtml(s),
     finance: () => financeTabHtml(s.finance || {}),
     admin: () => adminTabHtml(s.admin || {}),
     coaches: () => coachesTabHtml(s),
@@ -1434,6 +1476,34 @@ function profileTabHtml(tab) {
     notes: () => notesTabHtml(s.notes || [])
   };
   return renderers[tab]();
+}
+
+function planTabHtml(student) {
+  const plan = studentPlan(student);
+  const intensiveCount = activeActivityCountForStudent({ ...student, training_plan: "2 Weeks" });
+  const oneMonthCount = activeActivityCountForStudent({ ...student, training_plan: "1 Month" });
+  return `
+    <h3>Student plan</h3>
+    <div class="requirement-banner ${plan === "1 Month" ? "requirement-banner--ready" : "requirement-banner--review"}">
+      <div>
+        <strong>${escapeHtml(plan)}</strong>
+        <small>${plan === "1 Month" ? "This student will see Intensive + CAP activities." : "This student will see Intensive activities only."}</small>
+      </div>
+      <span data-icon="${plan === "1 Month" ? "calendar-check" : "calendar"}"></span>
+    </div>
+    <form id="profile-plan-form" class="form-grid">
+      <label class="field"><span>Plan</span><select name="training_plan">${optionsHtml(APP.planOptions, plan)}</select></label>
+      <div class="detail-item">
+        <small>2 Weeks</small>
+        <strong>Intensive activities only (${intensiveCount})</strong>
+      </div>
+      <div class="detail-item">
+        <small>1 Month</small>
+        <strong>Intensive + CAP activities (${oneMonthCount})</strong>
+      </div>
+      <div class="inline-alert span-2">Changing the plan adds missing checklist rows automatically. Existing activity history is kept; CAP rows are hidden when the student is tagged as 2 Weeks.</div>
+    </form>
+    <div class="page-actions"><button class="btn btn--primary" id="save-profile-plan">Save Plan</button></div>`;
 }
 
 function financeTabHtml(record) {
@@ -1467,6 +1537,7 @@ function adminTabHtml(record) {
 function coachesTabHtml(student) {
   const classroom = student.classroom || {};
   const activityRows = relevantStudentActivities(student);
+  const expectedActivities = activeActivityCountForStudent(student);
   return `
     <h3>Google Classroom checklist</h3>
     <form id="profile-classroom-form" class="form-grid">
@@ -1476,11 +1547,11 @@ function coachesTabHtml(student) {
       <label class="field span-2"><span>Notes</span><textarea name="notes">${escapeHtml(classroom.notes || "")}</textarea></label>
     </form>
     <div class="page-actions"><button class="btn btn--primary btn--compact" id="save-profile-classroom">Save Classroom Checklist</button></div>
-    <div class="profile-section-head"><h3>Activities checklist</h3><small class="muted">${activityRows.filter(a => a.status === "Pass").length} of ${activityRows.length} passed</small></div>
+    <div class="profile-section-head"><h3>Activities checklist</h3><small class="muted">${activityRows.filter(a => a.status === "Pass").length} of ${Math.max(activityRows.length, expectedActivities)} passed</small></div>
     <div class="activity-list">
       ${activityRows.length ? activityRows.map(row => `
         <form class="activity-row" data-activity-row="${row.id}">
-          <div class="activity-name">${escapeHtml(row.activity?.name || "Activity")}</div>
+          <div class="activity-name">${escapeHtml(row.activity?.name || "Activity")}<small>${escapeHtml(row.activity ? activityTrack(row.activity) : "Activity")}</small></div>
           <label class="field"><span>Status</span><select name="status">${optionsHtml(APP.activityStatuses, row.status || "Pending")}</select></label>
           <label class="field"><span>Score</span><input name="score" type="number" min="0" max="100" value="${escapeAttr(row.score ?? "")}"></label>
           <label class="field"><span>Coach Notes</span><input name="coach_notes" value="${escapeAttr(row.coach_notes || "")}"></label>
@@ -1545,6 +1616,7 @@ function notesTabHtml(notes) {
 
 function bindProfileTab() {
   $("#profile-edit-student")?.addEventListener("click", () => openStudentForm(state.profile));
+  $("#save-profile-plan")?.addEventListener("click", saveProfilePlan);
   $("#save-profile-finance")?.addEventListener("click", () => saveProfileRecord("finance_records", "#profile-finance-form", state.profile.finance?.id, "Finance status saved"));
   $("#save-profile-admin")?.addEventListener("click", () => saveProfileRecord("admin_records", "#profile-admin-form", state.profile.admin?.id, "Admin status saved"));
   $("#save-profile-classroom")?.addEventListener("click", () => saveProfileRecord("classroom_records", "#profile-classroom-form", state.profile.classroom?.id, "Classroom checklist saved"));
@@ -1552,6 +1624,27 @@ function bindProfileTab() {
   $$(".save-activity").forEach(button => button.addEventListener("click", () => saveActivity(button)));
   $$(".save-certificate").forEach(button => button.addEventListener("click", () => saveCertificate(button)));
   $("#add-note")?.addEventListener("click", addStudentNote);
+}
+
+async function saveProfilePlan() {
+  const form = $("#profile-plan-form");
+  if (!form.reportValidity()) return;
+  const values = normalizedFormValues(form);
+  const button = $("#save-profile-plan");
+  setButtonLoading(button, true, "Saving...");
+  const { error } = await state.supabase
+    .from("students")
+    .update({ training_plan: values.training_plan })
+    .eq("id", state.profile.id);
+  if (error) {
+    setButtonLoading(button, false);
+    return toast("Could not save plan", friendlyError(error), "error");
+  }
+  toast("Plan saved", values.training_plan === "1 Month" ? "CAP activities are now included for this student." : "Only Intensive activities will show for this student.", "success");
+  await refreshProfile();
+  if (state.route === "coach-checklist") renderCoachChecklist();
+  if (state.route === "students") renderStudents();
+  if (state.route === "dashboard") renderDashboard();
 }
 
 async function saveProfileRecord(table, formSelector, recordId, successTitle) {
@@ -1683,7 +1776,7 @@ function openCsvImport() {
       <label class="dropzone" id="csv-dropzone" for="csv-file">
         <span data-icon="upload-cloud"></span>
         <h3>Drop a CSV here or click to browse</h3>
-        <p>Required: first_name, last_name, email, course_group, batch_month, batch_year, batch_number</p>
+        <p>Required: first_name, last_name, email, course_group, batch_month, batch_year, batch_number. Optional: training_plan.</p>
       </label>
       <div class="page-actions" style="justify-content:flex-start;margin-top:10px">
         <button class="action-link" id="download-template" type="button"><span data-icon="download"></span> Download CSV template</button>
@@ -1767,6 +1860,9 @@ function validateCsvRows(rows) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email)) return skipped.push({ row: index + 2, reason: `Invalid email "${row.email}"` });
     if (row.finance_status && !APP.financeStatuses.includes(row.finance_status)) return skipped.push({ row: index + 2, reason: `Invalid finance_status "${row.finance_status}"` });
     if (row.student_status && !APP.studentStatuses.includes(row.student_status)) return skipped.push({ row: index + 2, reason: `Invalid student_status "${row.student_status}"` });
+    const trainingPlan = normalizeTrainingPlan(row.training_plan || "2 Weeks");
+    if (!trainingPlan) return skipped.push({ row: index + 2, reason: `Invalid training_plan "${row.training_plan}"` });
+    row.training_plan = trainingPlan;
     valid.push({ row: index + 2, data: row, course, month, year, number });
   });
   return { valid, skipped };
@@ -1807,7 +1903,8 @@ async function importCsvRows(validation) {
       phone: item.data.phone || null,
       course_group_id: group.id,
       batch_id: batch?.id,
-      coach: item.data.coach || null
+      coach: item.data.coach || null,
+      training_plan: item.data.training_plan || "2 Weeks"
     };
   }).filter(s => s.batch_id);
   let imported = 0;
@@ -1901,8 +1998,8 @@ function parseCsv(text) {
 }
 
 function downloadCsvTemplate() {
-  const header = "first_name,last_name,email,phone,course_group,batch_month,batch_year,batch_number,coach,finance_status,student_status";
-  const example = "Juan,Dela Cruz,juan@example.com,09171234567,USBK,July,2026,1,Coach Name,Pending Payment,Active";
+  const header = "first_name,last_name,email,phone,course_group,batch_month,batch_year,batch_number,training_plan,coach,finance_status,student_status";
+  const example = "Juan,Dela Cruz,juan@example.com,09171234567,USBK,July,2026,1,1 Month,Coach Name,Pending Payment,Active";
   downloadFile("sync2va-student-import-template.csv", `${header}\r\n${example}\r\n`, "text/csv;charset=utf-8");
 }
 
@@ -1911,7 +2008,7 @@ function downloadCsvTemplate() {
 async function exportStudents(filters = {}, filename = "sync2va-students.csv") {
   toast("Preparing export", "Fetching matching records from Supabase…", "warning", 1800);
   let query = state.supabase.from("students").select(`
-    first_name,last_name,email,phone,coach,created_at,updated_at,course_group_id,batch_id,
+    first_name,last_name,email,phone,coach,training_plan,created_at,updated_at,course_group_id,batch_id,
     course_group:course_groups(code,name),
     batch:batches(name,month,year,batch_number),
     finance:finance_records!inner(payment_status,amount_paid,balance,payment_method,payment_date),
@@ -1922,6 +2019,7 @@ async function exportStudents(filters = {}, filename = "sync2va-students.csv") {
   if (filters.courseGroup) query = query.eq("course_group_id", filters.courseGroup);
   if (filters.batch) query = query.eq("batch_id", filters.batch);
   if ((filters.month || filters.year) && !filters.batch) query = query.in("batch_id", batchIdsForPeriod(filters.month, filters.year, filters.courseGroup));
+  if (filters.plan) query = query.eq("training_plan", filters.plan);
   if (filters.finance) query = query.eq("finance.payment_status", filters.finance);
   if (filters.admin) query = query.eq("admin.student_status", filters.admin);
   if (filters.requirement) query = query.eq("requirements.overall_status", filters.requirement);
@@ -1946,6 +2044,7 @@ async function exportStudents(filters = {}, filename = "sync2va-students.csv") {
       batch_month: APP.months[(s.batch?.month || 1) - 1],
       batch_year: s.batch?.year,
       batch_number: s.batch?.batch_number,
+      training_plan: studentPlan(s),
       coach: s.coach,
       finance_status: s.finance?.payment_status,
       amount_paid: s.finance?.amount_paid,
@@ -2206,11 +2305,11 @@ function statusBadge(value) {
     "Certificate Ready": "green", "Met": "green", "Passed": "green", "Ready": "green",
     "Approved": "green", "Cleared": "green", "Yes": "green", "Pass": "green", "Resolved": "green",
     "Pending Payment": "yellow", "Pending": "yellow", "For Review": "yellow", "In Progress": "yellow",
-    "On Hold": "yellow", "Downpayment Paid": "blue", "Intensive Training": "blue",
+    "On Hold": "yellow", "Downpayment Paid": "blue", "Intensive Training": "blue", "2 Weeks": "blue",
     "Inactive": "neutral", "Archived": "neutral", "Not Eligible": "neutral", "No": "neutral",
     "Dropped": "red", "Refunded": "red", "Failed": "red", "Fail": "red", "Not Ready": "red",
     "Not Met": "red", "Not Approved": "red", "Hold": "red", "Open": "red", "High": "red",
-    "Retake": "orange", "Career Accelerator": "purple"
+    "Retake": "orange", "Career Accelerator": "purple", "1 Month": "purple", "CAP": "purple"
   };
   return `<span class="badge badge--${colors[status] || "neutral"}">${escapeHtml(status)}</span>`;
 }
@@ -2321,6 +2420,14 @@ function normalizeCourseCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
+function normalizeTrainingPlan(value) {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[-_]/g, " ").replace(/\s+/g, " ");
+  if (!normalized) return "2 Weeks";
+  if (["2 weeks", "2 week", "two weeks", "two week"].includes(normalized)) return "2 Weeks";
+  if (["1 month", "one month", "month"].includes(normalized)) return "1 Month";
+  return APP.planOptions.find(plan => plan.toLowerCase() === normalized) || "";
+}
+
 function hasActiveFilters(filters) {
   return Object.values(filters || {}).some(Boolean);
 }
@@ -2334,6 +2441,7 @@ function friendlyError(error) {
   if (/Failed to fetch/i.test(message)) return "Could not reach Supabase. Check the project URL, internet connection, and browser console.";
   if (/Invalid API key|JWT/i.test(message)) return "The Supabase anon key is invalid or expired.";
   if (/relation .* does not exist/i.test(message)) return "The database schema is missing. Run supabase-schema.sql in the Supabase SQL Editor.";
+  if (/column .*training_plan.*does not exist|column .*activity_track.*does not exist/i.test(message)) return "The database needs the latest Plan update. Run the updated supabase-schema.sql in the Supabase SQL Editor.";
   if (/duplicate key.*students_email/i.test(message) || /students_email_key/i.test(message)) return "A student with this email already exists.";
   if (/duplicate key/i.test(message)) return "This record already exists.";
   if (/row-level security/i.test(message)) return "Supabase blocked this request. Sign in and verify the RLS policies from the SQL schema.";

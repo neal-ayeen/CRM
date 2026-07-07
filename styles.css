@@ -514,6 +514,7 @@ code { padding: 2px 5px; border-radius: 5px; background: #eef1f5; font-size: .9e
 .activity-row .field { margin: 0; }
 .activity-row .field > span { font-size: 9px; }
 .activity-name { align-self: center; font-size: 11px; font-weight: 600; }
+.activity-name small { display: block; width: fit-content; margin-top: 5px; padding: 2px 6px; color: var(--faint); background: #fff; border: 1px solid var(--line); border-radius: 999px; font-size: 8px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .certificate-card { padding: 15px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 10px; }
 .certificate-card + .certificate-card { margin-top: 12px; }
 .certificate-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 13px; }

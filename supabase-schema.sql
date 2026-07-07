@@ -45,9 +45,27 @@ create table if not exists public.students (
   course_group_id uuid not null references public.course_groups(id) on delete restrict,
   batch_id uuid not null references public.batches(id) on delete restrict,
   coach text,
+  training_plan text not null default '2 Weeks' check (training_plan in ('2 Weeks', '1 Month')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.students add column if not exists training_plan text;
+update public.students set training_plan = '2 Weeks' where training_plan is null;
+alter table public.students alter column training_plan set default '2 Weeks';
+alter table public.students alter column training_plan set not null;
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'students_training_plan_check'
+      and conrelid = 'public.students'::regclass
+  ) then
+    alter table public.students
+      add constraint students_training_plan_check check (training_plan in ('2 Weeks', '1 Month'));
+  end if;
+end;
+$$;
 
 create table if not exists public.finance_records (
   id uuid primary key default gen_random_uuid(),
@@ -90,12 +108,46 @@ create table if not exists public.classroom_records (
 
 create table if not exists public.activities (
   id uuid primary key default gen_random_uuid(),
+  course_group_id uuid references public.course_groups(id) on delete cascade,
+  activity_track text not null default 'Intensive' check (activity_track in ('Intensive', 'CAP')),
   name text not null unique,
   sort_order smallint not null default 0,
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.activities
+  add column if not exists course_group_id uuid references public.course_groups(id) on delete cascade;
+alter table public.activities add column if not exists activity_track text;
+update public.activities
+set activity_track = case
+  when course_group_id is null and name in (
+    'ATS Resume Creation',
+    'Resume Optimization',
+    'Interview Practice',
+    'Mock Interview',
+    'Mock Call',
+    'Client Communication Practice',
+    'Job Application Readiness'
+  ) then 'CAP'
+  else 'Intensive'
+end
+where activity_track is null;
+alter table public.activities alter column activity_track set default 'Intensive';
+alter table public.activities alter column activity_track set not null;
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'activities_activity_track_check'
+      and conrelid = 'public.activities'::regclass
+  ) then
+    alter table public.activities
+      add constraint activities_activity_track_check check (activity_track in ('Intensive', 'CAP'));
+  end if;
+end;
+$$;
 
 create table if not exists public.student_activities (
   id uuid primary key default gen_random_uuid(),
@@ -166,18 +218,70 @@ on conflict (code) do update
 set name = excluded.name,
     program_type = excluded.program_type;
 
-insert into public.activities (name, sort_order, is_active)
-values
-  ('ATS Resume Creation', 1, true),
-  ('Resume Optimization', 2, true),
-  ('Interview Practice', 3, true),
-  ('Mock Interview', 4, true),
-  ('Mock Call', 5, true),
-  ('Client Communication Practice', 6, true),
-  ('Job Application Readiness', 7, true)
+with activity_seed(activity_track, course_code, sort_order, name) as (
+  values
+    ('Intensive', 'AUBK', 1, 'Xero Activity 1 - Asset, Liability, Income, Capital, Expense'),
+    ('Intensive', 'AUBK', 2, 'Xero Activity 2 - Chart of Accounts and Journal Entry'),
+    ('Intensive', 'AUBK', 3, 'Xero Activity 3 - Chart of Accounts: Accounts Creation'),
+    ('Intensive', 'AUBK', 4, 'Xero Activity 4 & 5 - Products and Services'),
+    ('Intensive', 'AUBK', 5, 'Xero Activity 6 - Purchases (Bills)'),
+    ('Intensive', 'AUBK', 6, 'Xero Activity 7 - More Bills To Record'),
+    ('Intensive', 'AUBK', 7, 'Xero Activity 8 - Reconciliation and Report'),
+    ('Intensive', 'AUBK', 8, 'Xero Final Activity - Invoice, Bills, Reconciliation, and Report'),
+    ('Intensive', 'AUBK', 9, 'Sync2VA Xero Assessment'),
+    ('Intensive', 'MEDVA', 1, 'Assignment 1 - Mastering Basic Digital Tools'),
+    ('Intensive', 'MEDVA', 2, 'Assignment 2 - Typing Test & EHR'),
+    ('Intensive', 'MEDVA', 3, 'Assignment 3 - Insurance Terminologies'),
+    ('Intensive', 'MEDVA', 4, 'Assignment 4 - Research'),
+    ('Intensive', 'MEDVA', 5, 'Assignment 5 - Insurance Computations'),
+    ('Intensive', 'MEDVA', 6, 'Assignment 6 - Referral'),
+    ('Intensive', 'MEDVA', 7, 'Assignment 7 - MRR'),
+    ('Intensive', 'MEDVA', 8, 'Assignment 8 - Transcription'),
+    ('Intensive', 'MEDVA', 9, 'Assignment 9 - Scribing'),
+    ('Intensive', 'MEDVA', 10, 'Final - Evaluation'),
+    ('Intensive', 'REVA', 1, 'Activity 1 - Practice MLS Activity'),
+    ('Intensive', 'REVA', 2, 'Activity 2 - Rental Properties & Vendor Research'),
+    ('Intensive', 'REVA', 3, 'Activity 3 - PMVA Accounting Activity'),
+    ('Intensive', 'REVA', 4, 'Activity 4 - Tenant Background Report'),
+    ('Intensive', 'REVA', 5, 'Activity 5 - Comparative Market Analysis'),
+    ('Intensive', 'REVA', 6, 'Activity 6 - Open House Poster'),
+    ('Intensive', 'REVA', 7, 'Activity 7 - Property Search (Buyer''s Side)'),
+    ('Intensive', 'REVA', 8, 'Activity 8 - TXN Calendar Scheduling'),
+    ('Intensive', 'USBK', 1, 'Day 2 - ALICE'),
+    ('Intensive', 'USBK', 2, 'Day 2 - Debit/Credit'),
+    ('Intensive', 'USBK', 3, 'Day 2 - Journal Entry'),
+    ('Intensive', 'USBK', 4, 'Day 2 - Journal, Posting and Trial Balance'),
+    ('Intensive', 'USBK', 5, 'Day 3 - Chart of Accounts'),
+    ('Intensive', 'USBK', 6, 'Day 4 - Products and Services'),
+    ('Intensive', 'USBK', 7, 'Day 5 - Expenses, Bills and Bills Payment'),
+    ('Intensive', 'USBK', 8, 'Day 6 - Sales Receipt, Invoice and Invoice Payment'),
+    ('Intensive', 'USBK', 9, 'Day 7 - Transfer, Journal Entry and Deposit'),
+    ('Intensive', 'USBK', 10, 'Day 8 - Bank Statements'),
+    ('Intensive', 'USBK', 11, 'Day 8 - Bank Transactions'),
+    ('Intensive', 'USBK', 12, 'Day 9 - Reconciliation'),
+    ('Intensive', 'USBK', 13, 'Day 10 - Reports'),
+    ('CAP', null, 1, 'ATS Resume Creation'),
+    ('CAP', null, 2, 'Resume Optimization'),
+    ('CAP', null, 3, 'Interview Practice'),
+    ('CAP', null, 4, 'Mock Interview'),
+    ('CAP', null, 5, 'Mock Call'),
+    ('CAP', null, 6, 'Client Communication Practice'),
+    ('CAP', null, 7, 'Job Application Readiness')
+),
+resolved_seed as (
+  select cg.id as course_group_id, s.activity_track, s.name, s.sort_order
+  from activity_seed s
+  left join public.course_groups cg on cg.code = s.course_code
+)
+insert into public.activities (course_group_id, activity_track, name, sort_order, is_active)
+select course_group_id, activity_track, name, sort_order, true
+from resolved_seed
 on conflict (name) do update
-set sort_order = excluded.sort_order,
-    is_active = true;
+set course_group_id = excluded.course_group_id,
+    activity_track = excluded.activity_track,
+    sort_order = excluded.sort_order,
+    is_active = true,
+    updated_at = now();
 
 -- ---------------------------------------------------------------------------
 -- Automatic timestamps and student defaults
@@ -251,7 +355,14 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  base_course_code text;
 begin
+  select regexp_replace(code, '^CAP[[:space:]]+', '')
+  into base_course_code
+  from public.course_groups
+  where id = new.course_group_id;
+
   insert into public.finance_records (student_id) values (new.id)
   on conflict (student_id) do nothing;
 
@@ -273,7 +384,18 @@ begin
   insert into public.student_activities (student_id, activity_id)
   select new.id, a.id
   from public.activities a
+  left join public.course_groups activity_course on activity_course.id = a.course_group_id
   where a.is_active = true
+    and (
+      (
+        a.activity_track = 'Intensive'
+        and (a.course_group_id is null or activity_course.code = base_course_code)
+      )
+      or (
+        a.activity_track = 'CAP'
+        and new.training_plan = '1 Month'
+      )
+    )
   on conflict (student_id, activity_id) do nothing;
 
   return new;
@@ -284,6 +406,17 @@ drop trigger if exists initialize_student_after_insert on public.students;
 create trigger initialize_student_after_insert
 after insert on public.students
 for each row execute function public.initialize_student_defaults();
+
+drop trigger if exists initialize_student_after_course_change on public.students;
+drop trigger if exists initialize_student_after_plan_or_course_change on public.students;
+create trigger initialize_student_after_plan_or_course_change
+after update of course_group_id, training_plan on public.students
+for each row
+when (
+  old.course_group_id is distinct from new.course_group_id
+  or old.training_plan is distinct from new.training_plan
+)
+execute function public.initialize_student_defaults();
 
 -- Ensure defaults also exist for students added before this schema version.
 insert into public.finance_records (student_id)
@@ -314,8 +447,23 @@ on conflict (student_id, certificate_type) do nothing;
 insert into public.student_activities (student_id, activity_id)
 select s.id, a.id
 from public.students s
+join public.course_groups student_course on student_course.id = s.course_group_id
 cross join public.activities a
+left join public.course_groups activity_course on activity_course.id = a.course_group_id
 where a.is_active = true
+  and (
+    (
+      a.activity_track = 'Intensive'
+      and (
+        a.course_group_id is null
+        or activity_course.code = regexp_replace(student_course.code, '^CAP[[:space:]]+', '')
+      )
+    )
+    or (
+      a.activity_track = 'CAP'
+      and s.training_plan = '1 Month'
+    )
+  )
 on conflict (student_id, activity_id) do nothing;
 
 -- ---------------------------------------------------------------------------
@@ -324,11 +472,14 @@ on conflict (student_id, activity_id) do nothing;
 
 create index if not exists students_course_group_idx on public.students(course_group_id);
 create index if not exists students_batch_idx on public.students(batch_id);
+create index if not exists students_training_plan_idx on public.students(training_plan);
 create index if not exists students_updated_at_idx on public.students(updated_at desc);
 create index if not exists students_first_name_trgm_idx on public.students using gin (lower(first_name) gin_trgm_ops);
 create index if not exists students_last_name_trgm_idx on public.students using gin (lower(last_name) gin_trgm_ops);
 create index if not exists students_email_trgm_idx on public.students using gin (lower(email) gin_trgm_ops);
 create index if not exists students_phone_trgm_idx on public.students using gin (phone gin_trgm_ops);
+create index if not exists activities_course_group_idx on public.activities(course_group_id, sort_order);
+create index if not exists activities_track_idx on public.activities(activity_track, sort_order);
 create index if not exists batches_period_idx on public.batches(year desc, month desc, batch_number);
 create index if not exists batches_status_idx on public.batches(status);
 create index if not exists finance_payment_status_idx on public.finance_records(payment_status);

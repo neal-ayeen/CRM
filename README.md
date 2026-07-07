@@ -33,15 +33,17 @@ Do not use a Supabase service role key in this frontend app.
 Use this exact header:
 
 ```text
-first_name,last_name,email,phone,course_group,batch_month,batch_year,batch_number,coach,finance_status,student_status
+first_name,last_name,email,phone,course_group,batch_month,batch_year,batch_number,training_plan,coach,finance_status,student_status
 ```
 
 - `course_group` must match a configured code such as `USBK` or `CAP USBK`.
+- Optional `training_plan` accepts `2 Weeks` or `1 Month`. If omitted, students default to `2 Weeks`.
 - `batch_month` accepts a month name, abbreviation, or number.
 - `batch_number` must be `1` or `2`.
 - Missing batches are created automatically.
 - Uploads are inserted in chunks of 200 for large files.
 - A database trigger creates finance, admin, classroom, requirement, activity, and two certificate records for each new student.
+- `2 Weeks` students receive Intensive activities only. `1 Month` students receive Intensive + CAP activities.
 - Duplicate emails are skipped.
 
 ## Security notes
