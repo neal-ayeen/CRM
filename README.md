@@ -146,6 +146,18 @@ Notes:
 - Missing batches are created automatically.
 - Duplicate emails are not reinserted, but related enrollment, finance, and payment-plan details are refreshed from the import file.
 
+## Repair older imports
+
+If students were imported before `deposit_amount` was mapped to Finance and Payment Plan totals, run `repair-imported-deposits.sql` once in the Supabase SQL Editor.
+
+It updates existing imported students so:
+
+- Finance `amount_paid` = imported `deposit_amount`
+- Finance `balance` = `regular_price - deposit_amount`
+- Payment Plan `deposit_amount` = imported `deposit_amount`
+- Payment Plan `total_paid` = imported `deposit_amount`
+- Payment Plan `total_contract_amount` = imported `regular_price`
+
 ## Email sending TODO
 
 The Email Center currently writes to `email_logs`. To send real emails, create a Supabase Edge Function or other backend service using SMTP/API credentials stored as server-side secrets. Do not put SMTP passwords or service role keys in `config.js`.

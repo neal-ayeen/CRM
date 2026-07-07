@@ -2024,15 +2024,23 @@ function enrollmentTabHtml(student) {
 
 function financeTabHtml(record) {
   if (isCoachOnly()) return `<div class="inline-alert">Coach accounts only see training access status in the Coach Checklist, not exact payment details.</div>`;
+  const profile = state.profile || {};
+  const regularPrice = parseMoney(profile.enrollment?.regular_price);
+  const fallbackDeposit = parseMoney(profile.payment_plan?.deposit_amount);
+  const amountPaid = parseMoney(record.amount_paid) || fallbackDeposit;
+  const balance = parseMoney(record.balance) || Math.max(regularPrice - amountPaid, 0);
+  const paymentStatus = record.payment_status && record.payment_status !== "Pending Deposit"
+    ? record.payment_status
+    : derivePaymentStatus(regularPrice, amountPaid, record.payment_status);
   return `
     <h3>Finance status</h3>
     <form id="profile-finance-form" class="form-grid">
-      <label class="field"><span>Payment Status</span><select name="payment_status">${optionsHtml(APP.financeStatuses, record.payment_status || "Pending Deposit")}</select></label>
+      <label class="field"><span>Payment Status</span><select name="payment_status">${optionsHtml(APP.financeStatuses, paymentStatus || "Pending Deposit")}</select></label>
       <label class="field"><span>Training Access Status</span><select name="training_access_status">${optionsHtml(APP.trainingAccessStatuses, record.training_access_status || "Active")}</select></label>
-      <label class="field"><span>Payment Method</span><select name="payment_method"><option value="">Select method</option>${optionsHtml(APP.paymentMethods, record.payment_method || "UnionBank")}</select></label>
+      <label class="field"><span>Payment Method</span><select name="payment_method"><option value="">Select method</option>${optionsHtml(APP.paymentMethods, record.payment_method || (amountPaid > 0 ? "UnionBank" : ""))}</select></label>
       <label class="field"><span>UnionBank Reference #</span><input name="unionbank_reference" value="${escapeAttr(record.unionbank_reference || "")}"></label>
-      <label class="field"><span>Amount Paid</span><input name="amount_paid" type="number" min="0" step="0.01" value="${escapeAttr(record.amount_paid ?? "0")}"></label>
-      <label class="field"><span>Balance</span><input name="balance" type="number" min="0" step="0.01" value="${escapeAttr(record.balance ?? "0")}"></label>
+      <label class="field"><span>Amount Paid</span><input name="amount_paid" type="number" min="0" step="0.01" value="${escapeAttr(amountPaid)}"></label>
+      <label class="field"><span>Balance</span><input name="balance" type="number" min="0" step="0.01" value="${escapeAttr(balance)}"></label>
       <label class="field"><span>Payment Date</span><input name="payment_date" type="date" value="${record.payment_date || ""}"></label>
       <label class="field"><span>Due Date</span><input name="due_date" type="date" value="${record.due_date || ""}"></label>
       <label class="field"><span>Refund Requested</span><select name="refund_requested">${optionsHtml([["true", "Yes"], ["false", "No"]], String(record.refund_requested ?? false))}</select></label>
@@ -2048,17 +2056,26 @@ function paymentPlanTabHtml(student) {
   if (isCoachOnly()) return `<div class="inline-alert">Payment plan details are hidden from Coach accounts.</div>`;
   const plan = student.payment_plan || {};
   const installments = [...(student.payment_installments || [])].sort((a, b) => a.installment_number - b.installment_number);
-  const rows = installments.length ? installments : [{ installment_number: 1, label: "Payment 1", amount_due: plan.total_contract_amount || student.enrollment?.final_price || 0, amount_paid: 0, payment_status: "Pending" }];
-  const totalPaid = rows.reduce((sum, row) => sum + Number(row.amount_paid || 0), 0);
-  const totalDue = rows.reduce((sum, row) => sum + Number(row.amount_due || 0), 0);
-  const balance = Math.max(totalDue - totalPaid, 0);
+  const contractAmount = parseMoney(plan.total_contract_amount) || parseMoney(student.enrollment?.regular_price) || parseMoney(student.enrollment?.final_price);
+  const fallbackPaid = parseMoney(plan.total_paid) || parseMoney(plan.deposit_amount);
+  const fallbackBalance = Math.max(contractAmount - fallbackPaid, 0);
+  const rows = installments.length ? installments : [{
+    installment_number: 1,
+    label: "Deposit",
+    amount_due: contractAmount,
+    amount_paid: fallbackPaid,
+    payment_status: fallbackPaid > 0 ? (fallbackBalance <= 0 ? "Paid" : "Partial") : "Pending"
+  }];
+  const totalPaid = installments.length ? rows.reduce((sum, row) => sum + Number(row.amount_paid || 0), 0) : fallbackPaid;
+  const totalDue = installments.length ? rows.reduce((sum, row) => sum + Number(row.amount_due || 0), 0) : contractAmount;
+  const balance = parseMoney(plan.balance) || Math.max(totalDue - totalPaid, 0);
   return `
     <h3>Payment plan</h3>
     <form id="profile-payment-plan-form" class="form-grid">
       <label class="field"><span>Payment Plan Type</span><select name="plan_type">${optionsHtml(APP.paymentPlanTypes, plan.plan_type || "Full Payment")}</select></label>
       <label class="field"><span>Number of Payments</span><input name="number_of_payments" type="number" min="1" max="5" value="${escapeAttr(plan.number_of_payments || rows.length || 1)}"></label>
       <label class="field"><span>Deposit Amount</span><input name="deposit_amount" type="number" min="0" step="0.01" value="${escapeAttr(plan.deposit_amount ?? 0)}"></label>
-      <label class="field"><span>Total Contract Amount</span><input name="total_contract_amount" type="number" min="0" step="0.01" value="${escapeAttr(plan.total_contract_amount || totalDue || student.enrollment?.final_price || 0)}"></label>
+      <label class="field"><span>Total Contract Amount</span><input name="total_contract_amount" type="number" min="0" step="0.01" value="${escapeAttr(contractAmount || totalDue || 0)}"></label>
       <div class="detail-item"><small>Total Paid</small><strong>${formatCurrency(totalPaid)}</strong></div>
       <div class="detail-item"><small>Balance</small><strong>${formatCurrency(balance)}</strong></div>
       <label class="field span-2"><span>Payment Plan Notes</span><textarea name="notes">${escapeHtml(plan.notes || "")}</textarea></label>
@@ -2644,9 +2661,7 @@ function validateCsvRows(rows) {
     if (!row.finance_status) {
       const regularPrice = parseMoney(row.regular_price);
       const depositAmount = parseMoney(row.deposit_amount);
-      row.finance_status = depositAmount > 0
-        ? (regularPrice > 0 && depositAmount >= regularPrice ? "Fully Paid" : "Deposit Paid")
-        : "Pending Deposit";
+      row.finance_status = derivePaymentStatus(regularPrice, depositAmount);
     }
     valid.push({ row: index + 2, data: row, course, month, year, number });
   });
@@ -2714,11 +2729,7 @@ async function importCsvRows(validation) {
         const source = byEmail.get(student.email) || {};
         const regularPrice = parseMoney(source.regular_price);
         const depositAmount = parseMoney(source.deposit_amount);
-        const paymentStatus = source.finance_status || (
-          depositAmount > 0
-            ? (regularPrice > 0 && depositAmount >= regularPrice ? "Fully Paid" : "Deposit Paid")
-            : "Pending Deposit"
-        );
+        const paymentStatus = derivePaymentStatus(regularPrice, depositAmount, source.finance_status);
         return {
           student_id: student.id,
           payment_status: paymentStatus,
@@ -3479,6 +3490,15 @@ function normalizeAccessStatus(value) {
   };
   if (aliases[compact]) return aliases[compact];
   return APP.trainingAccessStatuses.find(status => status.toLowerCase() === normalized.toLowerCase()) || "";
+}
+
+function derivePaymentStatus(regularPrice, amountPaid, fallback = "") {
+  if (fallback && fallback !== "Pending Deposit") return fallback;
+  const regular = parseMoney(regularPrice);
+  const paid = parseMoney(amountPaid);
+  if (paid <= 0) return fallback || "Pending Deposit";
+  if (regular > 0 && paid >= regular) return "Fully Paid";
+  return "Deposit Paid";
 }
 
 function parseMoney(value) {
