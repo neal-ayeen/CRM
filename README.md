@@ -140,9 +140,11 @@ Notes:
 - If `finance_status` is blank, the importer uses `Pending Deposit`.
 - `training_access_status` accepts Active, Payment Watch, Payment Hold, Remove from Training, Fully Paid. It also accepts `Yes` as `Active` and `No` as `Payment Hold`.
 - If `final_price` is blank, the importer uses `regular_price`.
+- `deposit_amount` is saved to both Finance `amount_paid` and Payment Plan `deposit_amount`.
+- Payment Plan `total_contract_amount` is based on `regular_price`.
 - The import template intentionally does not include `discount_type`, `discount_amount`, `payment_plan_type`, or `number_of_payments`; update those manually inside the student profile when needed.
 - Missing batches are created automatically.
-- Duplicate emails are skipped.
+- Duplicate emails are not reinserted, but related enrollment, finance, and payment-plan details are refreshed from the import file.
 
 ## Email sending TODO
 

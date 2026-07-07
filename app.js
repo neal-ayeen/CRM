@@ -2623,7 +2623,6 @@ function validateCsvRows(rows) {
     const importedFinanceStatus = row.finance_status;
     row.finance_status = normalizeFinanceStatus(row.finance_status);
     if (importedFinanceStatus && !row.finance_status) return skipped.push({ row: index + 2, reason: `Invalid finance_status "${importedFinanceStatus}"` });
-    row.finance_status = row.finance_status || "Pending Deposit";
     const importedAccessStatus = row.training_access_status;
     row.training_access_status = normalizeAccessStatus(row.training_access_status);
     if (importedAccessStatus && !row.training_access_status) return skipped.push({ row: index + 2, reason: `Invalid training_access_status "${importedAccessStatus}"` });
@@ -2642,6 +2641,13 @@ function validateCsvRows(rows) {
     if (!trainingPlan) return skipped.push({ row: index + 2, reason: `Invalid training_plan "${row.training_plan}"` });
     row.training_plan = trainingPlan;
     if (!row.final_price) row.final_price = row.regular_price || "0";
+    if (!row.finance_status) {
+      const regularPrice = parseMoney(row.regular_price);
+      const depositAmount = parseMoney(row.deposit_amount);
+      row.finance_status = depositAmount > 0
+        ? (regularPrice > 0 && depositAmount >= regularPrice ? "Fully Paid" : "Deposit Paid")
+        : "Pending Deposit";
+    }
     valid.push({ row: index + 2, data: row, course, month, year, number });
   });
   return { valid, skipped };
@@ -2699,23 +2705,34 @@ async function importCsvRows(validation) {
       insertedStudents.push(...(data || []));
     }
   }
-  if (insertedStudents.length) {
+  const matchedStudents = await fetchImportedStudentIds(students.map(student => student.email), errors);
+  if (matchedStudents.length) {
     setButtonLoading(button, true, "Applying imported statuses…");
     const byEmail = new Map(validation.valid.map(item => [item.data.email.toLowerCase(), item.data]));
-    const financeRows = insertedStudents
+    const financeRows = matchedStudents
       .map(student => {
         const source = byEmail.get(student.email) || {};
+        const regularPrice = parseMoney(source.regular_price);
+        const depositAmount = parseMoney(source.deposit_amount);
+        const paymentStatus = source.finance_status || (
+          depositAmount > 0
+            ? (regularPrice > 0 && depositAmount >= regularPrice ? "Fully Paid" : "Deposit Paid")
+            : "Pending Deposit"
+        );
         return {
           student_id: student.id,
-          payment_status: source.finance_status || undefined,
-          training_access_status: source.training_access_status || undefined
+          payment_status: paymentStatus,
+          training_access_status: source.training_access_status || "Active",
+          amount_paid: depositAmount,
+          balance: Math.max(regularPrice - depositAmount, 0),
+          payment_method: depositAmount > 0 ? "UnionBank" : undefined
         };
       })
-      .filter(row => APP.financeStatuses.includes(row.payment_status) || APP.trainingAccessStatuses.includes(row.training_access_status));
-    const adminRows = insertedStudents
+      .filter(row => APP.financeStatuses.includes(row.payment_status) || APP.trainingAccessStatuses.includes(row.training_access_status) || row.amount_paid > 0);
+    const adminRows = matchedStudents
       .map(student => ({ student_id: student.id, student_status: byEmail.get(student.email)?.student_status }))
       .filter(row => APP.studentStatuses.includes(row.student_status));
-    const enrollmentRows = insertedStudents.map(student => {
+    const enrollmentRows = matchedStudents.map(student => {
       const source = byEmail.get(student.email) || {};
       return {
         student_id: student.id,
@@ -2728,16 +2745,18 @@ async function importCsvRows(validation) {
         messenger_group_added: parseBooleanish(source.messenger_group_added)
       };
     });
-    const paymentPlanRows = insertedStudents.map(student => {
+    const paymentPlanRows = matchedStudents.map(student => {
       const source = byEmail.get(student.email) || {};
-      const contractAmount = parseMoney(source.final_price || source.regular_price);
+      const contractAmount = parseMoney(source.regular_price);
+      const depositAmount = parseMoney(source.deposit_amount);
       return {
         student_id: student.id,
         plan_type: "Full Payment",
         number_of_payments: 1,
-        deposit_amount: parseMoney(source.deposit_amount),
+        deposit_amount: depositAmount,
         total_contract_amount: contractAmount,
-        balance: contractAmount
+        total_paid: depositAmount,
+        balance: Math.max(contractAmount - depositAmount, 0)
       };
     });
     if (financeRows.length) {
@@ -2760,7 +2779,7 @@ async function importCsvRows(validation) {
   $("#csv-preview").innerHTML = `
     <div class="import-summary">
       <div><strong class="text-success">${imported}</strong><span>Imported</span></div>
-      <div><strong>${students.length - imported}</strong><span>Duplicates skipped</span></div>
+      <div><strong>${Math.max(matchedStudents.length - imported, 0)}</strong><span>Existing updated</span></div>
       <div><strong class="text-danger">${validation.skipped.length + errors.length}</strong><span>Errors / invalid</span></div>
     </div>
     ${errors.length ? `<div class="skip-list">${errors.map(escapeHtml).join("<br>")}</div>` : ""}`;
@@ -2770,6 +2789,21 @@ async function importCsvRows(validation) {
   if (state.route === "students") {
     state.studentsPage = 1;
   }
+}
+
+async function fetchImportedStudentIds(emails, errors) {
+  const uniqueEmails = [...new Set(emails.map(email => String(email || "").toLowerCase()).filter(Boolean))];
+  const matched = [];
+  for (let index = 0; index < uniqueEmails.length; index += 200) {
+    const chunk = uniqueEmails.slice(index, index + 200);
+    const { data, error } = await state.supabase
+      .from("students")
+      .select("id,email")
+      .in("email", chunk);
+    if (error) errors.push(`Imported student lookup: ${friendlyError(error)}`);
+    else matched.push(...(data || []).map(student => ({ ...student, email: student.email.toLowerCase() })));
+  }
+  return matched;
 }
 
 function parseCsv(text) {
