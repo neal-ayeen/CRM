@@ -624,7 +624,7 @@ async function renderStudents() {
     <section class="page-head">
       <div><h2>Student directory</h2><p>Search, filter, and manage every student record.</p></div>
       <div class="page-actions">
-        ${hasRole("Super Admin", "Admin") ? `<button class="btn btn--outline btn--compact" id="import-students"><span data-icon="upload"></span>Import CSV</button>` : ""}
+        ${hasRole("Super Admin", "Admin") ? `<button class="btn btn--outline btn--compact" id="import-students"><span data-icon="upload"></span>Import CSV/XLSX</button>` : ""}
         <button class="btn btn--outline btn--compact" id="export-all"><span data-icon="download"></span>Export all</button>
         <button class="btn btn--outline btn--compact" id="export-menu"><span data-icon="download"></span>Export filtered</button>
         ${hasRole("Super Admin", "Admin") ? `<button class="btn btn--primary btn--compact" id="add-student"><span data-icon="plus"></span>Add student</button>` : ""}
@@ -806,7 +806,7 @@ async function renderCourseGroups() {
 function openCourseGroupForm(group = null) {
   openModal({
     title: group ? "Edit course group" : "Create course group",
-    subtitle: "Course codes are used to generate batch names and validate CSV imports.",
+    subtitle: "Course codes are used to generate batch names and validate student imports.",
     size: "small",
     body: `
       <form id="course-form">
@@ -2476,22 +2476,22 @@ async function refreshProfile() {
   renderStudentProfile();
 }
 
-/* ---------- CSV import ---------- */
+/* ---------- Student import ---------- */
 
 function openCsvImport() {
   openModal({
-    title: "Import students from CSV",
-    subtitle: "Designed for 600+ rows. Batches and related student records are created automatically.",
+    title: "Import students from CSV or Excel",
+    subtitle: "Designed for your Monday.com bridge sheet. Batches and related student records are created automatically.",
     size: "medium",
     body: `
-      <input id="csv-file" type="file" accept=".csv,text/csv" class="hidden">
+      <input id="csv-file" type="file" accept=".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" class="hidden">
       <label class="dropzone" id="csv-dropzone" for="csv-file">
         <span data-icon="upload-cloud"></span>
-        <h3>Drop a CSV here or click to browse</h3>
-        <p>Required: first_name, last_name, email, course_group, batch_month, batch_year, batch_number. Optional: source, pricing, payment plan, finance/access status, messenger group.</p>
+        <h3>Drop a CSV or XLSX here, or click to browse</h3>
+        <p>Required: first_name, last_name, email, course_group, batch_month, batch_year, batch_number. Optional: phone, regular_price, training_plan, source, final_price, deposit_amount, finance/access status, messenger group.</p>
       </label>
       <div class="page-actions" style="justify-content:flex-start;margin-top:10px">
-        <button class="action-link" id="download-template" type="button"><span data-icon="download"></span> Download CSV template</button>
+        <button class="action-link" id="download-template" type="button"><span data-icon="download"></span> Download import template</button>
       </div>
       <div id="csv-preview"></div>`,
     footer: `<button class="btn btn--outline" data-close-modal>Cancel</button><button class="btn btn--primary" id="run-import" disabled>Import students</button>`
@@ -2501,7 +2501,7 @@ function openCsvImport() {
   const dropzone = $("#csv-dropzone");
   fileInput.addEventListener("change", async () => {
     if (!fileInput.files[0]) return;
-    parsed = await previewCsv(fileInput.files[0]);
+    parsed = await previewImportFile(fileInput.files[0]);
   });
   ["dragenter", "dragover"].forEach(type => dropzone.addEventListener(type, event => {
     event.preventDefault();
@@ -2513,25 +2513,21 @@ function openCsvImport() {
   }));
   dropzone.addEventListener("drop", async event => {
     const file = event.dataTransfer.files[0];
-    if (file) parsed = await previewCsv(file);
+    if (file) parsed = await previewImportFile(file);
   });
   $("#download-template").addEventListener("click", downloadCsvTemplate);
   $("#run-import").addEventListener("click", () => importCsvRows(parsed));
 }
 
-async function previewCsv(file) {
-  if (!file.name.toLowerCase().endsWith(".csv")) {
-    toast("Choose a CSV file", "Only .csv files are supported.", "warning");
-    return null;
-  }
-  const text = await file.text();
+async function previewImportFile(file) {
   let rows;
   try {
-    rows = parseCsv(text);
+    rows = await readImportRows(file);
   } catch (error) {
-    toast("Could not read CSV", error.message, "error");
+    toast("Could not read import file", error.message, "error");
     return null;
   }
+  if (!rows) return null;
   const required = ["first_name", "last_name", "email", "course_group", "batch_month", "batch_year", "batch_number"];
   const headers = rows.length ? Object.keys(rows[0]) : [];
   const missing = required.filter(header => !headers.includes(header));
@@ -2553,6 +2549,60 @@ async function previewCsv(file) {
   return validation;
 }
 
+async function readImportRows(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".csv")) return parseCsv(await file.text());
+  if (name.endsWith(".xlsx") || name.endsWith(".xls")) return parseWorkbookImport(file);
+  toast("Choose a CSV or Excel file", "Supported formats: .csv, .xlsx, .xls.", "warning");
+  return null;
+}
+
+async function parseWorkbookImport(file) {
+  if (!window.XLSX) throw new Error("The Excel parser did not load. Refresh the page and try again.");
+  const required = ["first_name", "last_name", "email", "course_group", "batch_month", "batch_year", "batch_number"];
+  const buffer = await file.arrayBuffer();
+  const workbook = window.XLSX.read(buffer, { type: "array", cellDates: false });
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    const rows = window.XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true, blankrows: false });
+    const headerIndex = findImportHeaderRow(rows, required);
+    if (headerIndex < 0) continue;
+    return worksheetRowsToObjects(rows, headerIndex);
+  }
+  throw new Error(`No worksheet contains the required headers: ${required.join(", ")}.`);
+}
+
+function findImportHeaderRow(rows, required) {
+  const maxScanRows = Math.min(rows.length, 12);
+  for (let index = 0; index < maxScanRows; index++) {
+    const headers = rows[index].map(value => String(value || "").trim().toLowerCase());
+    if (required.every(header => headers.includes(header))) return index;
+  }
+  return -1;
+}
+
+function worksheetRowsToObjects(rows, headerIndex) {
+  const headers = rows[headerIndex].map(value => String(value || "").trim().toLowerCase());
+  const nonEmptyHeaders = headers.filter(Boolean);
+  if (new Set(nonEmptyHeaders).size !== nonEmptyHeaders.length) throw new Error("The worksheet contains duplicate column names.");
+  return rows.slice(headerIndex + 1)
+    .map(row => {
+      const record = {};
+      headers.forEach((header, index) => {
+        if (header) record[header] = spreadsheetValueToText(row[index]);
+      });
+      return record;
+    })
+    .filter(record => Object.values(record).some(value => String(value).trim()));
+}
+
+function spreadsheetValueToText(value) {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : String(value);
+  return String(value);
+}
+
 function validateCsvRows(rows) {
   const valid = [];
   const skipped = [];
@@ -2570,22 +2620,28 @@ function validateCsvRows(rows) {
     const number = Number(row.batch_number);
     if (![1, 2].includes(number)) return skipped.push({ row: index + 2, reason: "batch_number must be 1 or 2" });
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email)) return skipped.push({ row: index + 2, reason: `Invalid email "${row.email}"` });
+    const importedFinanceStatus = row.finance_status;
     row.finance_status = normalizeFinanceStatus(row.finance_status);
-    if (raw.finance_status && !row.finance_status) return skipped.push({ row: index + 2, reason: `Invalid finance_status "${raw.finance_status}"` });
+    if (importedFinanceStatus && !row.finance_status) return skipped.push({ row: index + 2, reason: `Invalid finance_status "${importedFinanceStatus}"` });
+    row.finance_status = row.finance_status || "Pending Deposit";
+    const importedAccessStatus = row.training_access_status;
     row.training_access_status = normalizeAccessStatus(row.training_access_status);
-    if (raw.training_access_status && !row.training_access_status) return skipped.push({ row: index + 2, reason: `Invalid training_access_status "${raw.training_access_status}"` });
+    if (importedAccessStatus && !row.training_access_status) return skipped.push({ row: index + 2, reason: `Invalid training_access_status "${importedAccessStatus}"` });
+    row.training_access_status = row.training_access_status || "Active";
     row.source = normalizeStudentSource(row.source || "Other");
     if (row.source && !sourceOptions().some(([value]) => value.toLowerCase() === row.source.toLowerCase())) return skipped.push({ row: index + 2, reason: `Invalid source "${row.source}"` });
-    if (row.payment_plan_type && !APP.paymentPlanTypes.includes(row.payment_plan_type)) return skipped.push({ row: index + 2, reason: `Invalid payment_plan_type "${row.payment_plan_type}"` });
-    if (row.number_of_payments && (!Number.isInteger(Number(row.number_of_payments)) || Number(row.number_of_payments) < 1 || Number(row.number_of_payments) > 5)) return skipped.push({ row: index + 2, reason: "number_of_payments must be 1 to 5" });
-    ["regular_price", "discount_amount", "final_price", "deposit_amount"].forEach(key => {
-      if (row[key] && Number(row[key]) < 0) skipped.push({ row: index + 2, reason: `${key} cannot be negative` });
+    ["regular_price", "final_price", "deposit_amount"].forEach(key => {
+      const amount = parseMoney(row[key]);
+      if (row[key] && !Number.isFinite(amount)) skipped.push({ row: index + 2, reason: `${key} must be a number` });
+      if (Number.isFinite(amount) && amount < 0) skipped.push({ row: index + 2, reason: `${key} cannot be negative` });
+      if (Number.isFinite(amount)) row[key] = String(amount);
     });
     if (skipped.at(-1)?.row === index + 2) return;
     if (row.student_status && !APP.studentStatuses.includes(row.student_status)) return skipped.push({ row: index + 2, reason: `Invalid student_status "${row.student_status}"` });
     const trainingPlan = normalizeTrainingPlan(row.training_plan || "2 Weeks");
     if (!trainingPlan) return skipped.push({ row: index + 2, reason: `Invalid training_plan "${row.training_plan}"` });
     row.training_plan = trainingPlan;
+    if (!row.final_price) row.final_price = row.regular_price || "0";
     valid.push({ row: index + 2, data: row, course, month, year, number });
   });
   return { valid, skipped };
@@ -2664,23 +2720,24 @@ async function importCsvRows(validation) {
       return {
         student_id: student.id,
         source_name: source.source || "Other",
-        regular_price: Number(source.regular_price || 0),
-        discount_type: source.discount_type || "None",
-        discount_amount: Number(source.discount_amount || 0),
-        final_price: Number(source.final_price || 0),
-        enrollment_status: source.finance_status === "Deposit Paid" ? "Officially Enrolled" : "Pending Deposit",
+        regular_price: parseMoney(source.regular_price),
+        discount_type: "None",
+        discount_amount: 0,
+        final_price: parseMoney(source.final_price || source.regular_price),
+        enrollment_status: ["Deposit Paid", "Partial Payment", "Fully Paid"].includes(source.finance_status) ? "Officially Enrolled" : "Pending Deposit",
         messenger_group_added: parseBooleanish(source.messenger_group_added)
       };
     });
     const paymentPlanRows = insertedStudents.map(student => {
       const source = byEmail.get(student.email) || {};
+      const contractAmount = parseMoney(source.final_price || source.regular_price);
       return {
         student_id: student.id,
-        plan_type: source.payment_plan_type || "Full Payment",
-        number_of_payments: Number(source.number_of_payments || 1),
-        deposit_amount: Number(source.deposit_amount || 0),
-        total_contract_amount: Number(source.final_price || source.regular_price || 0),
-        balance: Number(source.final_price || source.regular_price || 0)
+        plan_type: "Full Payment",
+        number_of_payments: 1,
+        deposit_amount: parseMoney(source.deposit_amount),
+        total_contract_amount: contractAmount,
+        balance: contractAmount
       };
     });
     if (financeRows.length) {
@@ -2709,7 +2766,7 @@ async function importCsvRows(validation) {
     ${errors.length ? `<div class="skip-list">${errors.map(escapeHtml).join("<br>")}</div>` : ""}`;
   button.disabled = true;
   button.textContent = "Import complete";
-  toast("CSV import complete", `${imported} new student${imported === 1 ? "" : "s"} saved to Supabase.`, errors.length ? "warning" : "success");
+  toast("Import complete", `${imported} new student${imported === 1 ? "" : "s"} saved to Supabase.`, errors.length ? "warning" : "success");
   if (state.route === "students") {
     state.studentsPage = 1;
   }
@@ -2760,8 +2817,8 @@ function parseCsv(text) {
 }
 
 function downloadCsvTemplate() {
-  const header = "first_name,last_name,email,phone,course_group,batch_month,batch_year,batch_number,training_plan,source,regular_price,discount_type,discount_amount,final_price,payment_plan_type,number_of_payments,deposit_amount,finance_status,training_access_status,messenger_group_added,coach,student_status";
-  const example = "Juan,Dela Cruz,juan@example.com,09171234567,USBK,July,2026,1,1 Month,Referral,15000,Referral,1000,14000,Standard Staggered,3,5000,Deposit Paid,Active,Yes,Coach Name,Active";
+  const header = "first_name,last_name,phone,email,course_group,batch_month,batch_year,batch_number,regular_price,training_plan,Referred By,source,final_price,deposit_amount,finance_status,training_access_status,messenger_group_added,coach,student_status";
+  const example = "Juan,Dela Cruz,09171234567,juan@example.com,USBK,July,2026,1,3199,1 Month,Aine,Webinar,,1199,,Yes,Yes,,";
   downloadFile("sync2va-student-import-template.csv", `${header}\r\n${example}\r\n`, "text/csv;charset=utf-8");
 }
 
@@ -3368,7 +3425,33 @@ function normalizeFinanceStatus(value) {
 function normalizeAccessStatus(value) {
   const normalized = String(value || "").trim();
   if (!normalized) return "";
+  const compact = normalized.toLowerCase().replace(/[-_]/g, " ").replace(/\s+/g, " ");
+  const aliases = {
+    yes: "Active",
+    y: "Active",
+    true: "Active",
+    active: "Active",
+    allowed: "Active",
+    no: "Payment Hold",
+    n: "Payment Hold",
+    false: "Payment Hold",
+    hold: "Payment Hold",
+    "payment hold": "Payment Hold",
+    watch: "Payment Watch",
+    "payment watch": "Payment Watch",
+    remove: "Remove from Training",
+    "remove from training": "Remove from Training",
+    "fully paid": "Fully Paid"
+  };
+  if (aliases[compact]) return aliases[compact];
   return APP.trainingAccessStatuses.find(status => status.toLowerCase() === normalized.toLowerCase()) || "";
+}
+
+function parseMoney(value) {
+  const cleaned = String(value ?? "").trim().replace(/[₱$,\s]/g, "");
+  if (!cleaned) return 0;
+  const amount = Number(cleaned);
+  return Number.isFinite(amount) ? amount : Number.NaN;
 }
 
 function normalizeStudentSource(value) {

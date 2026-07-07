@@ -87,7 +87,7 @@ Upload the updated frontend files to add:
 - Coach Checklist page with activity status, comments, final recommendation, and limited finance visibility
 - Attendance page
 - Email Center page
-- Expanded CSV import and reports
+- Expanded CSV/XLSX import and reports
 
 ## Current modules
 
@@ -116,7 +116,7 @@ Upload the updated frontend files to add:
 - Attendance: batch sessions with Present, Late, Absent, Excused
 - Email Center: logs emails and templates now; direct sending is a TODO for Supabase Edge Function/SMTP
 
-## CSV import
+## Student import - CSV or XLSX
 
 Required columns:
 
@@ -127,15 +127,20 @@ first_name,last_name,email,course_group,batch_month,batch_year,batch_number
 Recommended full header:
 
 ```text
-first_name,last_name,email,phone,course_group,batch_month,batch_year,batch_number,training_plan,source,regular_price,discount_type,discount_amount,final_price,payment_plan_type,number_of_payments,deposit_amount,finance_status,training_access_status,messenger_group_added,coach,student_status
+first_name,last_name,phone,email,course_group,batch_month,batch_year,batch_number,regular_price,training_plan,Referred By,source,final_price,deposit_amount,finance_status,training_access_status,messenger_group_added,coach,student_status
 ```
 
 Notes:
 
+- You can upload the prepared `try.xlsx` bridge file directly, or save it as CSV.
+- The Monday.com raw export should first be copied into the bridge/import format.
 - `training_plan` accepts `2 Weeks` or `1 Month`.
 - `source` accepts Facebook/Social Media, Referral, Webinar, or Other.
 - `finance_status` accepts Pending Deposit, Deposit Paid, Partial Payment, Fully Paid, Payment Watch, Overdue, Payment Hold, Refund Requested, Refunded, Cancelled.
-- `training_access_status` accepts Active, Payment Watch, Payment Hold, Remove from Training, Fully Paid.
+- If `finance_status` is blank, the importer uses `Pending Deposit`.
+- `training_access_status` accepts Active, Payment Watch, Payment Hold, Remove from Training, Fully Paid. It also accepts `Yes` as `Active` and `No` as `Payment Hold`.
+- If `final_price` is blank, the importer uses `regular_price`.
+- The import template intentionally does not include `discount_type`, `discount_amount`, `payment_plan_type`, or `number_of_payments`; update those manually inside the student profile when needed.
 - Missing batches are created automatically.
 - Duplicate emails are skipped.
 
