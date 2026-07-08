@@ -577,7 +577,7 @@ async function renderCoachDashboard() {
   `;
   renderIcons($("#page-content"));
   $$("[data-jump]", $("#page-content")).forEach(el => el.addEventListener("click", () => navigate(el.dataset.jump)));
-  bindCoachRows();
+  bindCoachRows(workspace);
 }
 
 /* ---------- Students ---------- */
@@ -1138,10 +1138,11 @@ async function renderCoachChecklist() {
     .from("students")
     .select(`
       id,first_name,last_name,email,coach,training_plan,training_access_status,course_group_id,
+      batch_id,
       course_group:course_groups(id,code),
-      batch:batches(name),
+      batch:batches(id,name),
       classroom:classroom_records(invite_status,joined_status,date_sent,sent_by,final_coach_recommendation),
-      student_activities(status,score,activity:activities(*)),
+      student_activities(id,activity_id,status,score,coach_comment,coach_notes,date_checked,activity:activities(*)),
       requirements(overall_status)
     `)
     .order("updated_at", { ascending: false })
@@ -1152,6 +1153,7 @@ async function renderCoachChecklist() {
     <section class="page-head">
       <div><h2>Coach checklist</h2><p>Track Classroom invitations, activity progress, and student readiness.</p></div>
     </section>
+    ${coachQuickCheckCard(students)}
     <section class="filters" id="coach-filters">
       <div class="filter-search"><span data-icon="search"></span><input class="control" name="search" placeholder="Search student or coach…"></div>
       ${selectControl("course", "All course groups", APP.courseCodes.map(v => [v, v]))}
@@ -1190,7 +1192,161 @@ async function renderCoachChecklist() {
   };
   $("#coach-filters").addEventListener("input", apply);
   $("#coach-filters").addEventListener("change", apply);
+  bindCoachQuickCheck(students);
   bindCoachRows();
+}
+
+function coachQuickCheckCard(students) {
+  const batchMap = new Map();
+  students.forEach(student => {
+    if (student.batch_id) batchMap.set(student.batch_id, student.batch?.name || "Unnamed batch");
+  });
+  const batchOptions = [...batchMap.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  return `
+    <section class="card quick-check-card">
+      <div class="card-head">
+        <div>
+          <h3>Quick Activity Check</h3>
+          <p>Choose one batch and one activity, then update all students in one table.</p>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="form-grid form-grid--3">
+          <label class="field"><span>Batch</span><select id="quick-check-batch"><option value="">Select batch</option>${optionsHtml(batchOptions)}</select></label>
+          <label class="field"><span>Activity</span><select id="quick-check-activity" disabled><option value="">Select batch first</option></select></label>
+          <div class="page-actions">
+            <button class="btn btn--primary btn--compact" id="load-quick-check" type="button" disabled>Load students</button>
+          </div>
+        </div>
+        <div id="quick-check-workspace"></div>
+      </div>
+    </section>`;
+}
+
+function bindCoachQuickCheck(students) {
+  const batchSelect = $("#quick-check-batch");
+  const activitySelect = $("#quick-check-activity");
+  const loadButton = $("#load-quick-check");
+  const workspace = $("#quick-check-workspace");
+  if (!batchSelect || !activitySelect || !loadButton || !workspace) return;
+
+  const studentsForBatch = batchId => students
+    .filter(student => student.batch_id === batchId)
+    .sort((a, b) => fullName(a).localeCompare(fullName(b)));
+
+  const activitiesForBatch = batchId => {
+    const batchStudents = studentsForBatch(batchId);
+    return state.activities
+      .filter(activity => batchStudents.some(student => isRelevantActivityForStudent(student, activity)))
+      .sort((a, b) => activityTrackSort(a) - activityTrackSort(b) || (a.sort_order || 0) - (b.sort_order || 0) || a.name.localeCompare(b.name));
+  };
+
+  batchSelect.addEventListener("change", () => {
+    const activities = activitiesForBatch(batchSelect.value);
+    activitySelect.disabled = !activities.length;
+    activitySelect.innerHTML = activities.length
+      ? `<option value="">Select activity</option>${optionsHtml(activities.map(activity => [activity.id, `${activityTrack(activity)} - ${activity.name}`]))}`
+      : `<option value="">No activities for this batch</option>`;
+    loadButton.disabled = true;
+    workspace.innerHTML = "";
+  });
+
+  activitySelect.addEventListener("change", () => {
+    loadButton.disabled = !batchSelect.value || !activitySelect.value;
+    workspace.innerHTML = "";
+  });
+
+  loadButton.addEventListener("click", () => {
+    const batchStudents = studentsForBatch(batchSelect.value);
+    const activity = state.activities.find(item => item.id === activitySelect.value);
+    const rows = batchStudents
+      .filter(student => activity && isRelevantActivityForStudent(student, activity))
+      .map(student => {
+        const existing = (student.student_activities || []).find(row => row.activity_id === activity.id || row.activity?.id === activity.id) || {};
+        return { student, existing };
+      });
+    workspace.innerHTML = quickCheckTableHtml(rows, activity);
+    renderIcons(workspace);
+    bindQuickCheckWorkspace(workspace);
+  });
+}
+
+function quickCheckTableHtml(rows, activity) {
+  if (!rows.length) return emptyState("check-square", "No students for this activity", "Choose a different batch or activity.");
+  return `
+    <div class="quick-check-toolbar">
+      <label class="field"><span>Bulk Status</span><select id="quick-bulk-status"><option value="">Choose status</option>${optionsHtml(APP.activityStatuses)}</select></label>
+      <button class="btn btn--outline btn--compact" id="quick-apply-status" type="button">Apply status to all</button>
+      <button class="btn btn--outline btn--compact" id="quick-set-today" type="button">Set today for checked dates</button>
+      <span class="filter-spacer"></span>
+      <button class="btn btn--primary btn--compact" id="quick-save-all" type="button">Save ${rows.length} rows</button>
+    </div>
+    <div class="inline-alert">Activity: <strong>${escapeHtml(activityTrack(activity))} - ${escapeHtml(activity?.name || "Activity")}</strong>. Use this table to update the same activity for the whole batch.</div>
+    <div class="table-wrap">
+      <table class="data-table quick-check-table">
+        <thead><tr><th>Student</th><th>Status</th><th>Score</th><th>Coach Comment</th><th>Date Checked</th></tr></thead>
+        <tbody>
+          ${rows.map(({ student, existing }) => `
+            <tr class="quick-check-row" data-student-id="${student.id}" data-activity-id="${activity.id}">
+              <td><button class="action-link student-cell" data-coach-student="${student.id}" type="button">
+                <span class="student-avatar">${initials(fullName(student))}</span><span><strong>${escapeHtml(fullName(student))}</strong><small>${escapeHtml(student.email || "")}</small></span>
+              </button></td>
+              <td><select class="control" name="status">${optionsHtml(APP.activityStatuses, existing.status || "Not Started")}</select></td>
+              <td><input class="control" name="score" type="number" min="0" max="100" value="${escapeAttr(existing.score ?? "")}" placeholder="0-100"></td>
+              <td><input class="control" name="coach_comment" value="${escapeAttr(existing.coach_comment || existing.coach_notes || "")}" placeholder="Optional comment"></td>
+              <td><input class="control" name="date_checked" type="date" value="${existing.date_checked || ""}"></td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function bindQuickCheckWorkspace(workspace) {
+  $("#quick-apply-status")?.addEventListener("click", () => {
+    const status = $("#quick-bulk-status")?.value;
+    if (!status) return toast("Choose a status", "Select the bulk status first.", "warning");
+    $$(".quick-check-row select[name=status]", workspace).forEach(select => { select.value = status; });
+  });
+  $("#quick-set-today")?.addEventListener("click", () => {
+    const today = todayIso();
+    $$(".quick-check-row", workspace).forEach(row => {
+      const status = row.querySelector("[name=status]")?.value;
+      const date = row.querySelector("[name=date_checked]");
+      if (date && (!date.value || status !== "Not Started")) date.value = today;
+    });
+  });
+  $("#quick-save-all")?.addEventListener("click", buttonEvent => saveQuickCheckRows(buttonEvent.currentTarget, workspace));
+  bindCoachRows();
+}
+
+async function saveQuickCheckRows(button, workspace) {
+  const rows = $$(".quick-check-row", workspace).map(row => {
+    const status = row.querySelector("[name=status]").value;
+    const dateInput = row.querySelector("[name=date_checked]");
+    const scoreValue = row.querySelector("[name=score]").value;
+    if (status !== "Not Started" && !dateInput.value) dateInput.value = todayIso();
+    return {
+      student_id: row.dataset.studentId,
+      activity_id: row.dataset.activityId,
+      status,
+      score: scoreValue === "" ? null : Number(scoreValue),
+      coach_comment: row.querySelector("[name=coach_comment]").value.trim() || null,
+      date_checked: dateInput.value || null
+    };
+  });
+  if (!rows.length) return;
+  const invalidScore = rows.find(row => row.score !== null && (!Number.isFinite(row.score) || row.score < 0 || row.score > 100));
+  if (invalidScore) return toast("Invalid score", "Scores must be blank or between 0 and 100.", "error");
+  setButtonLoading(button, true, "Saving...");
+  const { error } = await state.supabase
+    .from("student_activities")
+    .upsert(rows, { onConflict: "student_id,activity_id" });
+  if (error) {
+    setButtonLoading(button, false);
+    return toast("Could not save activity checks", friendlyError(error), "error");
+  }
+  toast("Activity checks saved", `${rows.length} student activity row${rows.length === 1 ? "" : "s"} updated.`, "success");
+  renderCoachChecklist();
 }
 
 function coachRows(students) {
@@ -1219,8 +1375,8 @@ function coachRows(students) {
   }).join("");
 }
 
-function bindCoachRows() {
-  $$("[data-coach-student]").forEach(btn => btn.addEventListener("click", () => openStudentProfile(btn.dataset.coachStudent, "coaches")));
+function bindCoachRows(root = document) {
+  $$("[data-coach-student]", root).forEach(btn => btn.addEventListener("click", () => openStudentProfile(btn.dataset.coachStudent, "coaches")));
 }
 
 /* ---------- Attendance ---------- */

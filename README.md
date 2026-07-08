@@ -113,8 +113,22 @@ Upload the updated frontend files to add:
 - Finance: UnionBank reference, payment status, training access status, refund status, due dates, amount paid, balance
 - Payment plans: full payment, standard staggered, custom staggered, up to 5 payments
 - Coach checklist: Classroom invite/joined status, activity status, score, coach comment, final recommendation
+- Coach Quick Activity Check: select one batch and one activity, then update every student in that batch from one table
 - Attendance: batch sessions with Present, Late, Absent, Excused
 - Email Center: logs emails and templates now; direct sending is a TODO for Supabase Edge Function/SMTP
+
+## Faster coach activity checking
+
+On **Coach Checklist**, coaches can use **Quick Activity Check**:
+
+1. Select a batch.
+2. Select one activity.
+3. Click **Load students**.
+4. Optionally choose a bulk status and click **Apply status to all**.
+5. Add scores, comments, and checked dates.
+6. Click **Save all rows**.
+
+This lets coaches check one activity for the whole batch without opening each student profile one by one.
 
 ## Student import - CSV or XLSX
 
